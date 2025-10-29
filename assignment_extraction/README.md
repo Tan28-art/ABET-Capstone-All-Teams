@@ -4,8 +4,11 @@ Github Repo for the ABET Tools Capstone Project
 ## Getting Started
 1. Clone repo
 ```
-git clone https://github.com/your-username/ABET-Tools.git
-cd ABET-Tools
+git clone https://github.com/your-username/ABET-Tools.git](https://github.com/Tan28-art/ABET-Capstone-All-Teams.git
+cd ABET-Capstone-All-Teams
+git checkout origin/Team-2
+git fetch
+git pull
 ```
 
 2. create virtual env
