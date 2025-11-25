@@ -7,14 +7,13 @@ from pprint import pp
 TOKEN = os.getenv("CANVAS_TOKEN")
 BASE_URL = "https://asu.instructure.com/api/v1"
 
-def add_module_item(course_id, module_id, upload_folder_path, filepath, insert_pos):
+def add_module_item(course_id, module_id, filepath, insert_pos):
     """
     Adds a file as a module item.
     
     Args:
         course_id (string): ID of the course containing the module.
         module_id (string): ID of the module where the module item will be added to.
-        upload_folder_path (string): The folder where the file will be uploaded to.
         filepath (string): The filepath of the file to be added as a module item.
         insert_pos (int): The position of where the module item will be inserted into.
     """
@@ -28,7 +27,7 @@ def add_module_item(course_id, module_id, upload_folder_path, filepath, insert_p
         headers={"Authorization": f"Bearer {TOKEN}"},
         data={
             "name": f"{os.path.basename(filepath)}", # name of file to be uploaded
-            "parent_folder_path": upload_folder_path # location of where the file will be uploaded to
+            "parent_folder_path": "abet_assignment_data" # location of where the file will be uploaded to
             }
     )
     
@@ -59,14 +58,13 @@ def add_module_item(course_id, module_id, upload_folder_path, filepath, insert_p
     
     pp(item_add_res.json())
     
-def add_module_items(course_id, module_id, upload_folder_path, dirpath, insert_pos):
+def add_module_items(course_id, module_id, dirpath, insert_pos):
     """
     Adds all files in a directory as module items sequentially.
     
     Args:
         course_id (string): ID of the course containing the module.
         module_id (string): ID of the module where the module item will be added to.
-        upload_folder_path (string): The folder where the file will be uploaded to.
         dirpath (string): Directory path containing the files to be uploaded as moodule items.
         insert_pos (int): Starting position for where the module items will be inserted into.
     """
@@ -76,14 +74,13 @@ def add_module_items(course_id, module_id, upload_folder_path, dirpath, insert_p
         filepath = os.path.join(dirpath, filename) # get the filepath of the file
         if not os.path.isfile(filepath): continue # skip non-files
         
-        add_module_item(course_id, module_id, upload_folder_path, filepath, insert_pos) # add the file as a module item
+        add_module_item(course_id, module_id, filepath, insert_pos) # add the file as a module item
         insert_pos += 1 # increment the insert position
         
   
 course_id = "240102" # course id for course "TRN-2025Fall-sdosburn"
 module_id = "2723012" # module id for module "Testing Ground Fall 2025 Course Data"
-upload_folder_path = "Fall_2025_Testing Ground/_ABET_Outcome_Reports" # folder that will contain the uploaded files
 dir = "./documents" # directory containing the files to upload
 insert_pos = 7 # position of insertion for module items
 
-add_module_items(course_id, module_id, upload_folder_path, dir, insert_pos)
+add_module_items(course_id, module_id, dir, insert_pos)
