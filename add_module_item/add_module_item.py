@@ -83,4 +83,4 @@ module_id = "2723012" # module id for module "Testing Ground Fall 2025 Course Da
 dir = "./documents" # directory containing the files to upload
 insert_pos = 7 # position of insertion for module items
 
-add_module_items(course_id, module_id, dir, insert_pos)
+# add_module_items(course_id, module_id, dir, insert_pos)

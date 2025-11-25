@@ -1,6 +1,0 @@
-For each course, do the following:
-    For each assignment do the following:
-        - check if the assignment has a rubric
-        - if the assignment does have a rubric, then check if it has a ABET criteria
-        - extract all the data regarding the assignment and save it to a folder in the files section with the following format: <section-number>-<course-number>-<term>-<year>
-        - under modules, create a module for that course
