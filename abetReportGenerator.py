@@ -22,6 +22,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, logging
+from openai import OpenAI
 
 logging.set_verbosity_error()
 
@@ -31,7 +32,11 @@ pdf_out_dir = "generated_pdfs"
 os.makedirs(pdf_out_dir, exist_ok=True)
 output_csv = "ABETReportSummary.csv"
 
-model_path = r"C:\Users\AMD\Llama\Llama-3.1-8B-Instruct"
+#model_path = r"C:\Users\AMD\Llama\Llama-3.1-8B-Instruct"
+
+#put openai key in powershell to save before running as setx OPENAI_API_KEY "key"
+client = OpenAI()
+
 prompt_base = (
     "You are an education assessment expert generating ABET course assessment reports. "
     "You will produce only the report text itself — clean, factual, and formatted in professional academic language. "
@@ -43,17 +48,45 @@ prompt_base = (
     "Do not include any additional summaries or instructions."
 )
 
-max_tokens = 512
+#response = client.responses.create(
+#    model="gpt-5.2",
+#    input="Write a one-sentence bedtime story about a unicorn."
+#)
 
-print("Loading Llama model...")
-tokenizer = AutoTokenizer.from_pretrained(model_path)
-model = AutoModelForCausalLM.from_pretrained(
-    model_path, torch_dtype=torch.bfloat16, device_map="auto"
-)
-device = next(model.parameters()).device
-print(f"Model ready on {device}")
+#can probably delete this
+#max_tokens = 512
+
+#no need for tokenizer for openai?
+#print("Loading Llama model...")
+#tokenizer = AutoTokenizer.from_pretrained(model_path)
+#model = AutoModelForCausalLM.from_pretrained(
+#    model_path, torch_dtype=torch.bfloat16, device_map="auto"
+#)
+#device = next(model.parameters()).device
+#print(f"Model ready on {device}")
+
 
 #  HELPER FUNCTIONS 
+#this is where model and inputs are defined for openai
+def generate_section_with_openai(summary_text: str) -> str:
+
+    #role and content technique for differnet inputs still testing it out
+    response = client.responses.create(
+        model="gpt-5.2",
+        instructions="Talk like a pirate",
+        input=[
+            {
+                "role": "system",
+
+                "content":  f"{prompt_base}\n\nGiven the following structured Canvas data, write:\n" \
+             f"1. Interpretation of results (include sample size, rubric count, and assignment type distribution).\n" \
+             f"2. Whether the desired outcome was met or not met.\n" \
+             f"3. Feedback on what changes are needed if outcome was not met.\n\n" \
+             f"{summary_text}\n\nBegin report now:\n" 
+            }
+        ]
+    )
+    return response.output_text.strip()
 
 # Read in Json input files amd store them
 def load_json_files(glob_pattern):
@@ -89,20 +122,20 @@ def build_structured_summary(js):
 
 
 # Call the local LLM with condensed Json information
-def llama_generate_section(summary_text):
-    """Use Llama to generate clean, factual ABET report sections only."""
-    prompt = f"{prompt_base}\n\nGiven the following structured Canvas data, write:\n" \
-             f"1. Interpretation of results (include sample size, rubric count, and assignment type distribution).\n" \
-             f"2. Whether the desired outcome was met or not met.\n" \
-             f"3. Feedback on what changes are needed if outcome was not met.\n\n" \
-             f"{summary_text}\n\nBegin report now:\n"
+#def llama_generate_section(summary_text):
+#    """Use Llama to generate clean, factual ABET report sections only."""
+#    prompt = f"{prompt_base}\n\nGiven the following structured Canvas data, write:\n" \
+    #          f"1. Interpretation of results (include sample size, rubric count, and assignment type distribution).\n" \
+    #          f"2. Whether the desired outcome was met or not met.\n" \
+    #          f"3. Feedback on what changes are needed if outcome was not met.\n\n" \
+    #          f"{summary_text}\n\nBegin report now:\n"
 
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
-    with torch.no_grad():
-        out = model.generate(**inputs, max_new_tokens=max_tokens, eos_token_id=tokenizer.eos_token_id)
-    input_len = inputs["input_ids"].shape[-1]
-    gen = out[0][input_len:]
-    return tokenizer.decode(gen, skip_special_tokens=True).strip()
+    # inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    # with torch.no_grad():
+    #     out = model.generate(**inputs, max_new_tokens=max_tokens, eos_token_id=tokenizer.eos_token_id)
+    # input_len = inputs["input_ids"].shape[-1]
+    # gen = out[0][input_len:]
+    # return tokenizer.decode(gen, skip_special_tokens=True).strip()
 
 
 # Word Report Builder Class
@@ -227,7 +260,7 @@ class WordReportBuilder:
 
 # MAIN FUNCTION 
 def main():
-
+    
     # Read in Json input
     data = load_json_files(json_input_glob)
     summary_records = []
@@ -237,16 +270,21 @@ def main():
 
         # Prompt the LLM, and store summary output
         summary_text = build_structured_summary(js)
-        llama_output = llama_generate_section(summary_text)
+
+        #changing to openai
+        #llama_output = llama_generate_section(summary_text)
+        openai_output = generate_section_with_openai(summary_text)
 
         # Split Llama output into result & feedback heuristically
-        split_marker = "Feedback:" if "Feedback:" in llama_output else None
+        split_marker = "Feedback:" if "Feedback:" in openai_output else None
         if split_marker:
-            results_text, feedback_text = llama_output.split(split_marker, 1)
+            results_text, feedback_text = openai_output.split(split_marker, 1)
         else:
-            results_text, feedback_text = llama_output, "N/A"
+            results_text, feedback_text = openai_output, "N/A"
 
         # Create word builder object
+        #print("Saving DOCX to:", word_path)
+        
         word_path = os.path.join(pdf_out_dir, f"{base}_ABET_Report.docx")
         builder = WordReportBuilder(word_path)
 
