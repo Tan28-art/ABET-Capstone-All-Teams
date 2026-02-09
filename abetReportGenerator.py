@@ -221,12 +221,12 @@ class WordReportBuilder:
                     f"({report_data.get('course_identification', {}).get('course_code','N/A')})")
 
         # Find the Metric Instrument Type 
-        self.paragraph(f"Metric Instrument Type: {report_data.get('contributing_assignments', {})[0].get("metric", "N/A")}")
+        self.paragraph(f"Metric Instrument Type: {report_data.get('contributing_assignments', {})[0].get('metric', 'N/A')}")
         
         # Find the assignment Goals 
         self.paragraph("Goals:")
-        self.paragraph(f"1. To show competency, a student must score at least {report_data.get('contributing_assignments', {})[0].get("threshold", "70%")}.")
-        self.paragraph(f"2. To show the outcome has been met, {report_data.get('contributing_assignments', {})[0].get("threshold", "70%")} of the students must show competency.")
+        self.paragraph(f"1. To show competency, a student must score at least {report_data.get('contributing_assignments', {})[0].get('threshold', '70%')}.")
+        self.paragraph(f"2. To show the outcome has been met, {report_data.get('contributing_assignments', {})[0].get('threshold', '70%')} of the students must show competency.")
 
         # Course-Level Results, Sample Size, Percent Competent, etc.
         self.paragraph(f"Sample size: {report_data.get('results', {}).get('distribution_by_major', {}).get('CS/CSE', {}).get('sample_size', 'N/A')}")
@@ -246,7 +246,8 @@ class WordReportBuilder:
             for assign in assignments:
                 if assign:
                     instrument = assign.get('description_files_content', {})
-                    self.paragraph(f"Assessment Instrument: {[text.replace("\n", "") for text in instrument.values()]}")
+                    text_chunk = [text.replace('\n', '') for text in instrument.values()]
+                    self.paragraph(f"Assessment Instrument: {text_chunk}")
                 else:
                     self.paragraph("Assessment Instrument: N/A")
         else:
