@@ -11,6 +11,8 @@ import csv
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 import logging
+import time
+import shutil
 
 
 # Configure logging
@@ -49,10 +51,11 @@ class CanvasGradesFetcher:
         """Helper function to handle pagination for any Canvas API endpoint."""
         all_items = []
         current_params = params or {}
-        current_params["per_page"] = 100
-        
+        current_params.setdefault("per_page", 100)
+
         while url:
             try:
+                time.sleep(0.2)  # Rate-limit pacing
                 response = self.session.get(url, params=current_params)
                 response.raise_for_status()
                 all_items.extend(response.json())
@@ -64,7 +67,7 @@ class CanvasGradesFetcher:
                         (link["url"] for link in links if link.get("rel") == "next"),
                         None,
                     )
-                
+
                 # The 'next' URL provided by Canvas includes all necessary parameters.
                 current_params = None
 
@@ -72,6 +75,139 @@ class CanvasGradesFetcher:
                 logger.error(f"Error during paginated fetch from {url}: {e}")
                 break
         return all_items
+
+    def api_request(
+        self,
+        endpoint_or_url: str,
+        method: str = "GET",
+        params: dict = None,
+        data: dict = None,
+        stream: bool = False,
+    ) -> dict | requests.Response | None:
+        """
+        Performs a single, non-paginated API request to Canvas.
+
+        Returns:
+            - JSON dict for normal requests
+            - Response object if stream=True
+            - None on error
+        """
+        url = endpoint_or_url
+        if not url.startswith("https://"):
+            url = f"{self.canvas_domain}/api/v1/{endpoint_or_url}"
+
+        try:
+            time.sleep(0.2)
+            response = self.session.request(
+                method, url, params=params, data=data, stream=stream
+            )
+            response.raise_for_status()
+            if stream:
+                return response
+            return response.json() if response.text else {"status": "success"}
+        except requests.exceptions.RequestException as e:
+            logger.error(
+                "API Error on %s %s: %s | Response: %s",
+                method,
+                url,
+                e,
+                e.response.text if e.response else "N/A",
+            )
+            return None
+
+    def download_file(self, url: str, local_path: str) -> bool:
+        """
+        Downloads a file from a URL to a local path using a streamed response.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            response = self.api_request(url, stream=True)
+            if response is None:
+                logger.warning(
+                    "Download failed for %s: API request returned no response.",
+                    local_path,
+                )
+                return False
+            with response, open(local_path, "wb") as f:
+                shutil.copyfileobj(response.raw, f)
+            return True
+        except Exception as e:
+            logger.error("Error downloading '%s' to '%s': %s", url, local_path, e)
+            return False
+
+    def get_paginated_list(self, endpoint: str, params: dict = None) -> list:
+        """
+        Public wrapper around _get_paginated_list using a relative endpoint.
+        """
+        url = f"{self.canvas_domain}/api/v1/{endpoint}"
+        return self._get_paginated_list(url, params=params)
+
+    def upload_files(
+        self,
+        course_id: str,
+        folder_path: str,
+        file_paths: list[str],
+        max_retries: int = 3,
+    ):
+        """
+        Uploads files to a Canvas course folder, with retries.
+        """
+        logger.info(
+            "Uploading %d files to Canvas folder '%s'...",
+            len(file_paths),
+            folder_path,
+        )
+        for file_path in file_paths:
+            for attempt in range(max_retries):
+                try:
+                    filename = os.path.basename(file_path)
+                    init_data = {
+                        "name": filename,
+                        "parent_folder_path": folder_path,
+                        "on_duplicate": "overwrite",
+                    }
+                    upload_info = self.api_request(
+                        f"courses/{course_id}/files",
+                        method="POST",
+                        data=init_data,
+                    )
+                    if not upload_info:
+                        logger.warning("Upload init failed for %s", filename)
+                        continue
+
+                    with open(file_path, "rb") as f:
+                        upload_response = requests.post(
+                            upload_info["upload_url"],
+                            data=upload_info["upload_params"],
+                            files={"file": f},
+                        )
+                        upload_response.raise_for_status()
+
+                    if confirmation := upload_response.json():
+                        # The confirmation may provide a location to GET to confirm
+                        if confirmation.get("location"):
+                            self.api_request(confirmation["location"])  # confirm
+                    logger.info("Successfully uploaded %s", filename)
+                    break
+                except Exception as e:
+                    logger.error(
+                        "ERROR on attempt %d/%d for %s: %s",
+                        attempt + 1,
+                        max_retries,
+                        filename,
+                        e,
+                    )
+                    if attempt < max_retries - 1:
+                        time.sleep(2)
+                    else:
+                        logger.error(
+                            "All %d attempts failed for %s.",
+                            max_retries,
+                            filename,
+                        )
+            time.sleep(1)
 
     def fetch_course_assignments(self, course_id: int) -> List[Dict[str, Any]]:
         """Fetch all assignments for a given course.
@@ -135,6 +271,8 @@ class CanvasGradesFetcher:
     def fetch_course_grades(self, course_id: int) -> Dict[str, Any]:
         """Fetch complete grade data for a course including assignments, submissions, and students.
 
+        N + 1 api calls right now (1 for assignments then 1 per assignment for submissions)
+        Unfortunately this is unavoidable since Canvas does not provide a bulk endpoint for grades data.
         Args:
             course_id: Canvas course ID
 
@@ -202,7 +340,6 @@ class CanvasGradesFetcher:
             Path to saved file
         """
         if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"grades_summary_{grades_data['course_id']}.csv"
 
         with open(filename, "w", newline="") as f:

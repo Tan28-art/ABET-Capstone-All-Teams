@@ -2,70 +2,102 @@
 import csv
 import io
 import re
+from dataclasses import dataclass, field
 from typing import TextIO
 
-# regex to detect CS / CSE majors/plans
-CS_CSE_REGEX = re.compile(
-    r"""
-    (?:\bcomputer\s+science\b)      |   # "Computer Science"
-    (?:\bcomputer\s+sci\b)          |   # "Computer Sci"
-    (?:\bcomputer\s+systems\s+eng)  |   # "Computer Systems Eng"
-    (?:\bcse\b)                         # "CSE"
-    """,
-    re.IGNORECASE | re.VERBOSE,
+# Major name constants
+MAJOR_CS = "Computer Science"
+MAJOR_CSE = "Computer Systems Engineering"
+
+
+@dataclass
+class RosterMap:
+    """
+    Holds student-to-major mappings keyed by the identifier column
+    found in the uploaded CSV.
+
+    by_asurite : populated when the CSV has an 'ASURITE' column.
+                 Keys should be matched against Canvas user.login_id.
+    by_id      : populated when the CSV has an 'ID' column.
+                 Keys should be matched against Canvas user.sis_user_id.
+    """
+
+    by_asurite: dict[str, str] = field(default_factory=dict)
+    by_id: dict[str, str] = field(default_factory=dict)
+
+    def __len__(self) -> int:
+        """Total unique entries across both maps."""
+        return len(self.by_asurite) + len(self.by_id)
+
+
+# Separate regexes for distinguishing CS from CSE
+CSE_REGEX = re.compile(
+    r"(?:\bcomputer\s+syst(?:ems)?\s+e(?:ng|gr))"
+    r"|(?:\bcse\b)"
+    r"|(?:\bcomp\s+sys\b)",
+    re.IGNORECASE,
+)
+CS_REGEX = re.compile(
+    r"(?:\bcomputer\s+science\b)|(?:\bcomputer\s+sci\b)",
+    re.IGNORECASE,
 )
 
 
 def is_cs_or_cse(plan: str) -> bool:
     """Return True if the plan/major looks like CS or CSE."""
-    return bool(plan and CS_CSE_REGEX.search(plan))
+    return classify_major(plan) is not None
 
 
-def filter_cs_cse_csv(text: str) -> str:
+def classify_major(plan: str) -> str | None:
     """
-    text: full contents of the uploaded CSV as a single string.
-    returns: new CSV string with only CS/CSE rows.
+    Classify a program/plan string into a specific major.
+
+    Returns:
+        'Computer Systems Engineering' for CSE plans,
+        'Computer Science' for CS plans,
+        or None if neither matches.
     """
-    # Wrap the text in a file-like object for DictReader
-    input_io = io.StringIO(text)
-    reader = csv.DictReader(input_io)
+    if not plan:
+        return None
+    # Check CSE first — more specific match avoids false positives
+    if CSE_REGEX.search(plan):
+        return MAJOR_CSE
+    if CS_REGEX.search(plan):
+        return MAJOR_CS
+    return None
 
-    # If CSV is empty or invalid, just return it
-    if reader.fieldnames is None:
-        return text
 
-    output_io = io.StringIO()
-    writer = csv.DictWriter(output_io, fieldnames=reader.fieldnames)
-    writer.writeheader()
-
-    for row in reader:
-        major = (row.get("Program and Plan") or "").strip()
-        if not is_cs_or_cse(major):
-            continue
-        writer.writerow(row)
-
-    return output_io.getvalue()
-
-def parse_roster_for_major_map(file_stream: TextIO) -> dict:
+def parse_roster_for_major_map(file_stream: TextIO) -> RosterMap:
     """
-    Parses a CSV file stream to map a student's official ID to their major.
+    Parses a CSV file stream to map student identifiers to their major.
+
+    Supports two identifier columns (populated when the column exists):
+        - "ASURITE" -> RosterMap.by_asurite  (match against Canvas user.login_id)
+        - "ID"      -> RosterMap.by_id       (match against Canvas user.sis_user_id)
+
+    Distinguishes between Computer Science and Computer Systems Engineering.
 
     Args:
         file_stream: A text-based file stream of the CSV data.
 
     Returns:
-        A dictionary mapping the student ID (ASURITE) to their major.
-        Example: {"student12": "CS/CSE"}
+        A RosterMap with separate dicts keyed by identifier type.
     """
-    student_major_map = {}
-    
+    roster = RosterMap()
+
     reader = csv.DictReader(file_stream)
     for row in reader:
         major_plan = (row.get("Program and Plan") or "").strip()
-        
-        if is_cs_or_cse(major_plan):
-            # Use the 'ASURITE' column from the CSV as the key, as it contains the login id we can use to match
-            if student_id := row.get("ASURITE"):
-                student_major_map[student_id.strip()] = "CS/CSE"
-                
-    return student_major_map
+        major = classify_major(major_plan)
+        if not major:
+            continue
+
+        # ASURITE key — matches Canvas user.login_id
+        if asurite := row.get("ASURITE"):
+            roster.by_asurite[asurite.strip()] = major
+
+        # ID key — matches Canvas user.sis_user_id
+        if student_id := row.get("ID"):
+            roster.by_id[str(student_id).strip()] = major
+
+    return roster
