@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Python: module abetReportGenerator</title>
+</head><body>
+
+<table class="heading">
+<tr class="heading-text decor">
+<td class="title">&nbsp;<br><strong class="title">abetReportGenerator</strong></td>
+<td class="extra"><a href=".">index</a><br><a href="file:/home/chester-urbati/Documents/School/CSE485/Project/ABET-Capstone-All-Teams/abetReportGenerator.py">/home/chester-urbati/Documents/School/CSE485/Project/ABET-Capstone-All-Teams/abetReportGenerator.py</a></td></tr></table>
+    <p><span class="code">abetReportGenerator-template_embed.py<br>
+------------------------------------<br>
+ABET&nbsp;Assessment&nbsp;Report&nbsp;Generator<br>
+&nbsp;<br>
+-&nbsp;Reads&nbsp;Canvas&nbsp;JSON&nbsp;data&nbsp;from&nbsp;input_jsons/*.json<br>
+-&nbsp;Writes&nbsp;DOCX&nbsp;reports&nbsp;to&nbsp;generated_pdfs/&lt;json_stem&gt;_ABET_Report.docx<br>
+-&nbsp;Uses&nbsp;embedded&nbsp;DOCX&nbsp;template&nbsp;(Base64)&nbsp;written&nbsp;once&nbsp;to&nbsp;generated_pdfs/_ABET_TEMPLATE.docx<br>
+-&nbsp;Uses&nbsp;OpenAI&nbsp;ONLY&nbsp;to&nbsp;fill&nbsp;the&nbsp;final&nbsp;"changes&nbsp;needed..."&nbsp;tail&nbsp;when&nbsp;outcome&nbsp;was&nbsp;not&nbsp;met<br>
+-&nbsp;Preserves&nbsp;template&nbsp;formatting&nbsp;by&nbsp;replacing&nbsp;text&nbsp;inside&nbsp;existing&nbsp;template&nbsp;paragraphs&nbsp;AND&nbsp;table&nbsp;cells<br>
+&nbsp;<br>
+IMPORTANT:<br>
+-&nbsp;Put&nbsp;your&nbsp;template&nbsp;DOCX&nbsp;Base64&nbsp;into&nbsp;TEMPLATE_DOCX_B64.</span></p>
+<p>
+<table class="section">
+<tr class="decor pkg-content-decor heading-text">
+<td class="section-title" colspan=3>&nbsp;<br><strong class="bigsection">Modules</strong></td></tr>
+    
+<tr><td class="decor pkg-content-decor"><span class="code">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></td><td>&nbsp;</td>
+<td class="singlecolumn"><table><tr><td class="multicolumn"><a href="base64.html">base64</a><br>
+<a href="csv.html">csv</a><br>
+</td><td class="multicolumn"><a href="html.html">html</a><br>
+<a href="json.html">json</a><br>
+</td><td class="multicolumn"><a href="os.html">os</a><br>
+<a href="re.html">re</a><br>
+</td><td class="multicolumn"><a href="time.html">time</a><br>
+</td></tr></table></td></tr></table><p>
+<table class="section">
+<tr class="decor functions-decor heading-text">
+<td class="section-title" colspan=3>&nbsp;<br><strong class="bigsection">Functions</strong></td></tr>
+    
+<tr><td class="decor functions-decor"><span class="code">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></td><td>&nbsp;</td>
+<td class="singlecolumn"><dl><dt><a name="-build_structured_summary"><strong>build_structured_summary</strong></a>(js: Dict[str, Any]) -&gt; str</dt><dd><span class="code">Docstring&nbsp;for&nbsp;build_structured_summary<br>
+&nbsp;<br>
+Only&nbsp;used&nbsp;to&nbsp;give&nbsp;the&nbsp;LLM&nbsp;context&nbsp;when&nbsp;outcome&nbsp;was&nbsp;not&nbsp;met.<br>
+&nbsp;<br>
+:param&nbsp;js:&nbsp;JSON&nbsp;dict&nbsp;from&nbsp;ABET&nbsp;API&nbsp;response<br>
+:type&nbsp;js:&nbsp;Dict[str,&nbsp;Any]<br>
+:return:&nbsp;Structured&nbsp;summary&nbsp;string&nbsp;with&nbsp;key&nbsp;info&nbsp;about&nbsp;the&nbsp;course,&nbsp;outcome,&nbsp;and&nbsp;results<br>
+:rtype:&nbsp;str</span></dd></dl>
+ <dl><dt><a name="-ensure_template_docx"><strong>ensure_template_docx</strong></a>(path: str) -&gt; None</dt><dd><span class="code">Docstring&nbsp;for&nbsp;ensure_template_docx<br>
+&nbsp;<br>
+Writes&nbsp;the&nbsp;embedded&nbsp;template&nbsp;DOCX&nbsp;to&nbsp;disk&nbsp;if&nbsp;it&nbsp;doesn't&nbsp;exist.<br>
+&nbsp;<br>
+:param&nbsp;path:&nbsp;File&nbsp;path&nbsp;to&nbsp;write&nbsp;the&nbsp;template&nbsp;DOCX&nbsp;to<br>
+:type&nbsp;path:&nbsp;str</span></dd></dl>
+ <dl><dt><a name="-generate_feedback_with_openai"><strong>generate_feedback_with_openai</strong></a>(summary_text: str) -&gt; str</dt><dd><span class="code">Docstring&nbsp;for&nbsp;generate_feedback_with_openai<br>
+&nbsp;<br>
+Generates&nbsp;feedback&nbsp;text&nbsp;using&nbsp;OpenAI&nbsp;API&nbsp;based&nbsp;on&nbsp;the&nbsp;provided&nbsp;structured&nbsp;summary&nbsp;text&nbsp;created&nbsp;<br>
+from&nbsp;json&nbsp;payload.&nbsp;If&nbsp;the&nbsp;API&nbsp;key&nbsp;is&nbsp;not&nbsp;set&nbsp;or&nbsp;if&nbsp;the&nbsp;API&nbsp;call&nbsp;fails,&nbsp;it&nbsp;returns&nbsp;"NA".&nbsp;The&nbsp;<br>
+function&nbsp;expects&nbsp;the&nbsp;summary_text&nbsp;to&nbsp;contain&nbsp;key&nbsp;information&nbsp;about&nbsp;the&nbsp;course,&nbsp;outcome,&nbsp;and<br>
+results,&nbsp;which&nbsp;it&nbsp;uses&nbsp;as&nbsp;context&nbsp;for&nbsp;generating&nbsp;feedback&nbsp;when&nbsp;the&nbsp;outcome&nbsp;was&nbsp;not&nbsp;met.<br>
+&nbsp;<br>
+:param&nbsp;summary_text:&nbsp;Structured&nbsp;summary&nbsp;text&nbsp;to&nbsp;provide&nbsp;as&nbsp;context&nbsp;for&nbsp;feedback&nbsp;generation&nbsp;when&nbsp;outcome&nbsp;was&nbsp;not&nbsp;met.<br>
+:type&nbsp;summary_text:&nbsp;str<br>
+:return:&nbsp;Generated&nbsp;feedback&nbsp;text,&nbsp;or&nbsp;"NA"&nbsp;if&nbsp;OpenAI&nbsp;is&nbsp;not&nbsp;available<br>
+:rtype:&nbsp;str</span></dd></dl>
+ <dl><dt><a name="-get_course_code"><strong>get_course_code</strong></a>(js: Dict[str, Any]) -&gt; str</dt><dd><span class="code">Docstring&nbsp;for&nbsp;get_course_code<br>
+&nbsp;<br>
+Gets&nbsp;the&nbsp;course&nbsp;code&nbsp;from&nbsp;the&nbsp;JSON&nbsp;dict,&nbsp;with&nbsp;a&nbsp;fallback&nbsp;to&nbsp;"N/A"&nbsp;if&nbsp;not&nbsp;found.<br>
+It&nbsp;first&nbsp;checks&nbsp;for&nbsp;"course_info.course_code"&nbsp;property,&nbsp;then&nbsp;"course_identification.course_code"&nbsp;property.&nbsp;<br>
+If&nbsp;all&nbsp;else&nbsp;fails,&nbsp;it&nbsp;returns&nbsp;"N/A".<br>
+&nbsp;<br>
+:param&nbsp;js:&nbsp;JSON&nbsp;dict&nbsp;from&nbsp;ABET&nbsp;API&nbsp;response<br>
+:type&nbsp;js:&nbsp;Dict[str,&nbsp;Any]<br>
+:return:&nbsp;Course&nbsp;code,&nbsp;with&nbsp;fallback&nbsp;to&nbsp;course_identification.course_code&nbsp;or&nbsp;"N/A"<br>
+:rtype:&nbsp;str</span></dd></dl>
+ <dl><dt><a name="-get_course_name"><strong>get_course_name</strong></a>(js: Dict[str, Any]) -&gt; str</dt><dd><span class="code">Docstring&nbsp;for&nbsp;get_course_name<br>
+&nbsp;<br>
+Gets&nbsp;the&nbsp;course&nbsp;name&nbsp;from&nbsp;the&nbsp;JSON,&nbsp;with&nbsp;fallback&nbsp;to&nbsp;course_info.course_name&nbsp;or&nbsp;"N/A".<br>
+&nbsp;<br>
+:param&nbsp;js:&nbsp;JSON&nbsp;dict&nbsp;from&nbsp;ABET&nbsp;API&nbsp;response<br>
+:type&nbsp;js:&nbsp;Dict[str,&nbsp;Any]<br>
+:return:&nbsp;Course&nbsp;name,&nbsp;with&nbsp;fallback&nbsp;to&nbsp;course_identification.name&nbsp;or&nbsp;"N/A"<br>
+:rtype:&nbsp;str</span></dd></dl>
+ <dl><dt><a name="-get_outcome_long_desc"><strong>get_outcome_long_desc</strong></a>(js: Dict[str, Any]) -&gt; str</dt><dd><span class="code">Docstring&nbsp;for&nbsp;get_outcome_long_desc<br>
+&nbsp;<br>
+Gets&nbsp;the&nbsp;ABET&nbsp;outcome&nbsp;long&nbsp;description&nbsp;from&nbsp;the&nbsp;JSON,&nbsp;with&nbsp;fallback&nbsp;to&nbsp;outcome_identification.long_description&nbsp;or&nbsp;outcome_identification.description&nbsp;or&nbsp;"".<br>
+&nbsp;<br>
+:param&nbsp;js:&nbsp;JSON&nbsp;dict&nbsp;from&nbsp;ABET&nbsp;API&nbsp;response<br>
+:type&nbsp;js:&nbsp;Dict[str,&nbsp;Any]<br>
+:return:&nbsp;ABET&nbsp;outcome&nbsp;long&nbsp;description,&nbsp;with&nbsp;fallback&nbsp;to&nbsp;outcome_identification.long_description&nbsp;or&nbsp;outcome_identification.description&nbsp;or&nbsp;""<br>
+:rtype:&nbsp;str</span></dd></dl>
+ <dl><dt><a name="-get_outcome_title"><strong>get_outcome_title</strong></a>(js: Dict[str, Any]) -&gt; str</dt><dd><span class="code">Docstring&nbsp;for&nbsp;get_outcome_title<br>
+&nbsp;<br>
+Gets&nbsp;the&nbsp;ABET&nbsp;outcome&nbsp;title&nbsp;from&nbsp;the&nbsp;JSON,&nbsp;with&nbsp;fallback&nbsp;to&nbsp;outcome_identification.title&nbsp;or&nbsp;"N/A".<br>
+&nbsp;<br>
+:param&nbsp;js:&nbsp;JSON&nbsp;dict&nbsp;from&nbsp;ABET&nbsp;API&nbsp;response<br>
+:type&nbsp;js:&nbsp;Dict[str,&nbsp;Any]<br>
+:return:&nbsp;ABET&nbsp;outcome&nbsp;title,&nbsp;with&nbsp;fallback&nbsp;to&nbsp;outcome_identification.title&nbsp;or&nbsp;"N/A"<br>
+:rtype:&nbsp;str</span></dd></dl>
+ <dl><dt><a name="-get_overall_summary"><strong>get_overall_summary</strong></a>(js: Dict[str, Any]) -&gt; Dict[str, Any]</dt><dd><span class="code">Docstring&nbsp;for&nbsp;get_overall_summary<br>
+&nbsp;<br>
+Returns&nbsp;normalized&nbsp;overall&nbsp;summary&nbsp;dict&nbsp;with&nbsp;keys:<br>
+&nbsp;&nbsp;sample_size,&nbsp;number_competent,&nbsp;percent_competent,&nbsp;outcome_met<br>
+&nbsp;<br>
+:param&nbsp;js:&nbsp;JSON&nbsp;dict&nbsp;from&nbsp;ABET&nbsp;API&nbsp;response<br>
+:type&nbsp;js:&nbsp;Dict[str,&nbsp;Any]<br>
+:return:&nbsp;Normalized&nbsp;overall&nbsp;summary&nbsp;dict<br>
+:rtype:&nbsp;Dict[str,&nbsp;Any]</span></dd></dl>
+ <dl><dt><a name="-get_threshold"><strong>get_threshold</strong></a>(js: Dict[str, Any]) -&gt; str</dt><dd><span class="code">Docstring&nbsp;for&nbsp;get_threshold<br>
+&nbsp;<br>
+Gets&nbsp;the&nbsp;threshold&nbsp;value&nbsp;from&nbsp;the&nbsp;contributing&nbsp;assignments.&nbsp;If&nbsp;not&nbsp;set&nbsp;or&nbsp;empty,&nbsp;defaults&nbsp;to&nbsp;"70%".&nbsp;<br>
+This&nbsp;is&nbsp;a&nbsp;common&nbsp;default&nbsp;threshold&nbsp;used&nbsp;in&nbsp;ABET&nbsp;assessments&nbsp;when&nbsp;a&nbsp;specific&nbsp;threshold&nbsp;is&nbsp;not&nbsp;provided.&nbsp;<br>
+&nbsp;<br>
+:param&nbsp;js:&nbsp;JSON&nbsp;dict&nbsp;from&nbsp;ABET&nbsp;API&nbsp;response<br>
+:type&nbsp;js:&nbsp;Dict[str,&nbsp;Any]<br>
+:return:&nbsp;Threshold&nbsp;value,&nbsp;or&nbsp;"70%"&nbsp;if&nbsp;not&nbsp;set&nbsp;or&nbsp;empty.&nbsp;<br>
+:rtype:&nbsp;str</span></dd></dl>
+ <dl><dt><a name="-infer_metric_instrument_type"><strong>infer_metric_instrument_type</strong></a>(js: Dict[str, Any]) -&gt; str</dt><dd><span class="code">Docstring&nbsp;for&nbsp;infer_metric_instrument_type<br>
+&nbsp;<br>
+Identifies&nbsp;the&nbsp;metric&nbsp;instrument&nbsp;type&nbsp;(e.g.&nbsp;essay,&nbsp;exam,&nbsp;quiz,&nbsp;project)&nbsp;based&nbsp;on&nbsp;explicit&nbsp;fields&nbsp;or&nbsp;by&nbsp;inferring&nbsp;from&nbsp;assignment&nbsp;names&nbsp;and&nbsp;descriptions.&nbsp;<br>
+If&nbsp;no&nbsp;clear&nbsp;type&nbsp;is&nbsp;found,&nbsp;it&nbsp;defaults&nbsp;to&nbsp;"Assignment".<br>
+&nbsp;<br>
+:param&nbsp;js:&nbsp;JSON&nbsp;dict&nbsp;from&nbsp;ABET&nbsp;API&nbsp;response<br>
+:type&nbsp;js:&nbsp;Dict[str,&nbsp;Any]<br>
+:return:&nbsp;Metric&nbsp;instrument&nbsp;type&nbsp;(essay,&nbsp;exam,&nbsp;quiz,&nbsp;project),&nbsp;or&nbsp;"Assignment"&nbsp;if&nbsp;not&nbsp;set&nbsp;or&nbsp;empty<br>
+:rtype:&nbsp;str</span></dd></dl>
+ <dl><dt><a name="-iter_all_paragraphs"><strong>iter_all_paragraphs</strong></a>(doc: &lt;function Document at 0x7c490a791120&gt;)</dt><dd><span class="code">Docstring&nbsp;for&nbsp;iter_all_paragraphs<br>
+&nbsp;<br>
+Yield&nbsp;paragraphs&nbsp;in&nbsp;document&nbsp;body&nbsp;AND&nbsp;inside&nbsp;all&nbsp;table&nbsp;cells.<br>
+&nbsp;<br>
+:param&nbsp;doc:&nbsp;Document&nbsp;object&nbsp;to&nbsp;iterate&nbsp;through<br>
+:type&nbsp;doc:&nbsp;docx.document.Document</span></dd></dl>
+ <dl><dt><a name="-load_json_files"><strong>load_json_files</strong></a>(glob_pattern: str)</dt><dd><span class="code">Docstring&nbsp;for&nbsp;load_json_files<br>
+&nbsp;<br>
+Loads&nbsp;JSON&nbsp;files&nbsp;matching&nbsp;the&nbsp;glob&nbsp;pattern&nbsp;and&nbsp;returns&nbsp;a&nbsp;list&nbsp;of&nbsp;tuples&nbsp;(filename,&nbsp;json_dict).<br>
+&nbsp;<br>
+:param&nbsp;glob_pattern:&nbsp;JSON&nbsp;files&nbsp;in&nbsp;string&nbsp;glob&nbsp;format,&nbsp;e.g.&nbsp;'data/*.json'<br>
+:type&nbsp;glob_pattern:&nbsp;str</span></dd></dl>
+ <dl><dt><a name="-main"><strong>main</strong></a>()</dt><dd><span class="code">#&nbsp;main</span></dd></dl>
+ <dl><dt><a name="-normalize_course_line_for_template"><strong>normalize_course_line_for_template</strong></a>(course_code: str) -&gt; str</dt><dd><span class="code">Docstring&nbsp;for&nbsp;normalize_course_line_for_template<br>
+&nbsp;<br>
+Template&nbsp;wants:&nbsp;'CSE&nbsp;#&nbsp;301'<br>
+&nbsp;<br>
+This&nbsp;function&nbsp;normalizes&nbsp;various&nbsp;formats&nbsp;of&nbsp;course&nbsp;codes&nbsp;into&nbsp;the&nbsp;standard&nbsp;format.<br>
+&nbsp;<br>
+Regex&nbsp;Pattern&nbsp;Description:<br>
+-&nbsp;`r"\b([A-Z]{2,4})\s*#?\s*(\d{3})\b"`:&nbsp;Matches&nbsp;and&nbsp;captures&nbsp;course&nbsp;codes&nbsp;with&nbsp;a&nbsp;prefix<br>
+&nbsp;&nbsp;consisting&nbsp;of&nbsp;2&nbsp;to&nbsp;4&nbsp;uppercase&nbsp;letters,&nbsp;optionally&nbsp;separated&nbsp;by&nbsp;spaces&nbsp;or&nbsp;a&nbsp;'#',&nbsp;<br>
+&nbsp;&nbsp;followed&nbsp;by&nbsp;exactly&nbsp;three&nbsp;digits&nbsp;as&nbsp;the&nbsp;course&nbsp;number.&nbsp;This&nbsp;pattern&nbsp;ensures&nbsp;that&nbsp;inputs<br>
+&nbsp;&nbsp;like&nbsp;'CSE&nbsp;301',&nbsp;'CS101',&nbsp;or&nbsp;'MATH&nbsp;#150'&nbsp;are&nbsp;normalized&nbsp;into&nbsp;a&nbsp;consistent&nbsp;format.<br>
+&nbsp;<br>
+:param&nbsp;course_code:&nbsp;Raw&nbsp;course&nbsp;code&nbsp;string&nbsp;to&nbsp;normalize<br>
+:type&nbsp;course_code:&nbsp;str<br>
+:return:&nbsp;Normalized&nbsp;course&nbsp;code&nbsp;in&nbsp;the&nbsp;format&nbsp;'PREFIX&nbsp;#&nbsp;NUMBER',&nbsp;or&nbsp;'N/A'&nbsp;if&nbsp;input&nbsp;is&nbsp;empty<br>
+:rtype:&nbsp;str</span></dd></dl>
+ <dl><dt><a name="-replace_paragraph_text_preserve_style"><strong>replace_paragraph_text_preserve_style</strong></a>(p, new_text: str) -&gt; None</dt><dd><span class="code">Docstring&nbsp;for&nbsp;replace_paragraph_text_preserve_style<br>
+&nbsp;<br>
+Replaces&nbsp;paragraph&nbsp;text&nbsp;while&nbsp;preserving&nbsp;formatting&nbsp;of&nbsp;the&nbsp;first&nbsp;run&nbsp;(best&nbsp;effort).<br>
+&nbsp;<br>
+:param&nbsp;p:&nbsp;Paragraph&nbsp;object&nbsp;to&nbsp;modify<br>
+:type&nbsp;p:&nbsp;docx.text.paragraph.Paragraph<br>
+:param&nbsp;new_text:&nbsp;New&nbsp;text&nbsp;to&nbsp;set&nbsp;in&nbsp;the&nbsp;paragraph<br>
+:type&nbsp;new_text:&nbsp;str</span></dd></dl>
+ <dl><dt><a name="-safe_int"><strong>safe_int</strong></a>(x) -&gt; Optional[int]</dt><dd><span class="code">Docstring&nbsp;for&nbsp;safe_int<br>
+&nbsp;<br>
+Incase&nbsp;of&nbsp;floating&nbsp;point&nbsp;numbers,&nbsp;bools,&nbsp;None,&nbsp;or&nbsp;strings&nbsp;with&nbsp;extra&nbsp;whitespace&nbsp;or&nbsp;formatting,&nbsp;<br>
+this&nbsp;function&nbsp;attempts&nbsp;to&nbsp;convert&nbsp;to&nbsp;an&nbsp;integer.&nbsp;Returns&nbsp;None&nbsp;if&nbsp;conversion&nbsp;fails.<br>
+&nbsp;<br>
+:param&nbsp;x:&nbsp;Input&nbsp;value&nbsp;to&nbsp;convert&nbsp;to&nbsp;integer<br>
+:return:&nbsp;Integer&nbsp;value&nbsp;or&nbsp;None&nbsp;if&nbsp;conversion&nbsp;fails<br>
+:rtype:&nbsp;int&nbsp;|&nbsp;None</span></dd></dl>
+ <dl><dt><a name="-strip_html"><strong>strip_html</strong></a>(s: str) -&gt; str</dt><dd><span class="code">Docstring&nbsp;for&nbsp;strip_html<br>
+&nbsp;<br>
+Strips&nbsp;HTML&nbsp;tags&nbsp;from&nbsp;a&nbsp;string,&nbsp;replaces&nbsp;&lt;br&gt;&nbsp;with&nbsp;newlines,&nbsp;unescapes&nbsp;HTML&nbsp;entities,&nbsp;and&nbsp;normalizes&nbsp;whitespace.<br>
+&nbsp;<br>
+:param&nbsp;s:&nbsp;HTML&nbsp;string&nbsp;to&nbsp;strip<br>
+:type&nbsp;s:&nbsp;str<br>
+:return:&nbsp;Stripped&nbsp;string&nbsp;with&nbsp;HTML&nbsp;tags&nbsp;removed&nbsp;and&nbsp;whitespace&nbsp;normalized<br>
+:rtype:&nbsp;str</span></dd></dl>
+ <dl><dt><a name="-update_score_distribution_table"><strong>update_score_distribution_table</strong></a>(doc: &lt;function Document at 0x7c490a791120&gt;, thr: str, sample_size, number_competent) -&gt; None</dt><dd><span class="code">Docstring&nbsp;for&nbsp;update_score_distribution_table<br>
+&nbsp;<br>
+Expected&nbsp;template&nbsp;labels&nbsp;(from&nbsp;your&nbsp;template):<br>
+&nbsp;&nbsp;-&nbsp;"100%-70%"&nbsp;&nbsp;<br>
+&nbsp;&nbsp;-&nbsp;"Below&nbsp;70%"<br>
+&nbsp;<br>
+This&nbsp;function&nbsp;searches&nbsp;for&nbsp;rows&nbsp;containing&nbsp;these&nbsp;labels&nbsp;(with&nbsp;some&nbsp;flexibility)&nbsp;and&nbsp;updates&nbsp;the<br>
+corresponding&nbsp;numeric&nbsp;cells&nbsp;with&nbsp;the&nbsp;number&nbsp;of&nbsp;competent&nbsp;and&nbsp;below-threshold&nbsp;students.&nbsp;It&nbsp;first&nbsp;<br>
+tries&nbsp;to&nbsp;find&nbsp;a&nbsp;purely&nbsp;numeric&nbsp;cell&nbsp;in&nbsp;the&nbsp;row&nbsp;to&nbsp;update;&nbsp;if&nbsp;none&nbsp;is&nbsp;found,&nbsp;it&nbsp;falls&nbsp;back&nbsp;to&nbsp;updating&nbsp;<br>
+the&nbsp;cell&nbsp;immediately&nbsp;to&nbsp;the&nbsp;right&nbsp;of&nbsp;the&nbsp;label&nbsp;cell.&nbsp;The&nbsp;function&nbsp;uses&nbsp;safe_int&nbsp;to&nbsp;handle&nbsp;various&nbsp;<br>
+formats&nbsp;of&nbsp;numeric&nbsp;input&nbsp;and&nbsp;ensures&nbsp;that&nbsp;it&nbsp;does&nbsp;not&nbsp;crash&nbsp;on&nbsp;unexpected&nbsp;data&nbsp;formats.<br>
+&nbsp;<br>
+:param&nbsp;doc:&nbsp;Document&nbsp;object&nbsp;to&nbsp;update<br>
+:type&nbsp;doc:&nbsp;docx.document.Document<br>
+:param&nbsp;thr:&nbsp;Threshold&nbsp;string&nbsp;(e.g.&nbsp;"70%")&nbsp;to&nbsp;determine&nbsp;which&nbsp;rows&nbsp;to&nbsp;update<br>
+:type&nbsp;thr:&nbsp;str<br>
+:param&nbsp;sample_size:&nbsp;Total&nbsp;number&nbsp;of&nbsp;students&nbsp;assessed&nbsp;(used&nbsp;to&nbsp;calculate&nbsp;number&nbsp;below&nbsp;threshold)<br>
+:type&nbsp;sample_size:&nbsp;int&nbsp;|&nbsp;str<br>
+:param&nbsp;number_competent:&nbsp;Number&nbsp;of&nbsp;students&nbsp;deemed&nbsp;competent&nbsp;(at&nbsp;or&nbsp;above&nbsp;threshold)<br>
+:type&nbsp;number_competent:&nbsp;int&nbsp;|&nbsp;str</span></dd></dl>
+ <dl><dt><a name="-update_section1_in_doc"><strong>update_section1_in_doc</strong></a>(doc: &lt;function Document at 0x7c490a791120&gt;, js: Dict[str, Any], feedback_text: Optional[str]) -&gt; None</dt><dd><span class="code">Docstring&nbsp;for&nbsp;update_section1_in_doc<br>
+&nbsp;<br>
+Updates&nbsp;the&nbsp;first&nbsp;section&nbsp;of&nbsp;the&nbsp;document&nbsp;with&nbsp;ABET&nbsp;data&nbsp;from&nbsp;the&nbsp;JSON&nbsp;dict.&nbsp;It&nbsp;replaces&nbsp;specific&nbsp;<br>
+lines&nbsp;in&nbsp;the&nbsp;template&nbsp;with&nbsp;corresponding&nbsp;data&nbsp;such&nbsp;as&nbsp;outcome&nbsp;title,&nbsp;course&nbsp;code,&nbsp;metric&nbsp;instrument&nbsp;<br>
+type,&nbsp;threshold,&nbsp;sample&nbsp;size,&nbsp;competency&nbsp;summary,&nbsp;and&nbsp;outcome&nbsp;status.&nbsp;If&nbsp;the&nbsp;outcome&nbsp;was&nbsp;not&nbsp;met,&nbsp;<br>
+it&nbsp;also&nbsp;includes&nbsp;generated&nbsp;feedback&nbsp;text&nbsp;based&nbsp;on&nbsp;the&nbsp;structured&nbsp;summary&nbsp;of&nbsp;the&nbsp;ABET&nbsp;data.&nbsp;The&nbsp;<br>
+function&nbsp;iterates&nbsp;through&nbsp;all&nbsp;paragraphs&nbsp;in&nbsp;the&nbsp;document&nbsp;(including&nbsp;those&nbsp;inside&nbsp;tables)&nbsp;and&nbsp;<br>
+updates&nbsp;the&nbsp;text&nbsp;while&nbsp;attempting&nbsp;to&nbsp;preserve&nbsp;the&nbsp;original&nbsp;formatting.<br>
+&nbsp;<br>
+:param&nbsp;doc:&nbsp;Document&nbsp;object&nbsp;to&nbsp;update&nbsp;with&nbsp;ABET&nbsp;data<br>
+:type&nbsp;doc:&nbsp;Document<br>
+:param&nbsp;js:&nbsp;JSON&nbsp;dict&nbsp;from&nbsp;ABET&nbsp;API&nbsp;response&nbsp;containing&nbsp;course,&nbsp;outcome,&nbsp;and&nbsp;assessment&nbsp;data<br>
+:type&nbsp;js:&nbsp;Dict[str,&nbsp;Any]<br>
+:param&nbsp;feedback_text:&nbsp;Generated&nbsp;feedback&nbsp;text&nbsp;to&nbsp;include&nbsp;in&nbsp;the&nbsp;report&nbsp;if&nbsp;the&nbsp;outcome&nbsp;was&nbsp;not&nbsp;met,&nbsp;or&nbsp;None&nbsp;if&nbsp;not&nbsp;applicable.&nbsp;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Comes&nbsp;from&nbsp;OpenAI&nbsp;generation&nbsp;based&nbsp;on&nbsp;the&nbsp;structured&nbsp;summary&nbsp;of&nbsp;the&nbsp;ABET&nbsp;data.<br>
+:type&nbsp;feedback_text:&nbsp;Optional[str]</span></dd></dl>
+</td></tr></table><p>
+<table class="section">
+<tr class="decor data-decor heading-text">
+<td class="section-title" colspan=3>&nbsp;<br><strong class="bigsection">Data</strong></td></tr>
+    
+<tr><td class="decor data-decor"><span class="code">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></td><td>&nbsp;</td>
+<td class="singlecolumn"><strong>Dict</strong> = typing.Dict<br>
+<strong>Iterable</strong> = typing.Iterable<br>
+<strong>OPENAI_MODEL</strong> = 'gpt-5.2'<br>
+<strong>Optional</strong> = typing.Optional<br>
+<strong>TEMPLATE_DOCX_B64</strong> = 'UEsDBBQABgAIAAAAIQDkJIlMfQEAACkGAAATAAgCW0NvbnRl...pdGVtMS54bWwucmVsc1BLBQYAAAAADwAPANQDAAC7QAAAAAA='<br>
+<strong>Tuple</strong> = typing.Tuple<br>
+<strong>json_input_glob</strong> = 'input_jsons/*.json'<br>
+<strong>out_dir</strong> = 'generated_pdfs'<br>
+<strong>output_csv</strong> = 'ABETReportSummary.csv'<br>
+<strong>prompt_base</strong> = 'You are an education assessment expert writing A...tra lines. 1-3 sentences. Concise and actionable.'<br>
+<strong>template_path</strong> = 'generated_pdfs/_ABET_TEMPLATE.docx'</td></tr></table>
+</body></html>
