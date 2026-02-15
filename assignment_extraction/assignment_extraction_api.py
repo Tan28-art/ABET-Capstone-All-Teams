@@ -791,6 +791,7 @@ def process_course_with_roster(
         course_info = grades_fetcher.api_request(
             f"courses/{course_id}", params={"include[]": ["syllabus_body", "term"]}
         )
+
         if not course_info:
             raise HTTPException(
                 status_code=404, detail="Course not found or invalid token."
@@ -978,6 +979,82 @@ def generate_report_json(
     finally:
         cleanup_temp_dir(temp_dir)
 
+
+@app.post("/move-data-between-courses/{course_id_to_pull}/{course_id_to_push}")
+def move_data_between_courses(course_id_to_pull: str, 
+                              course_id_to_push: str,
+                              canvas_access_token: Annotated[str, Header()]):
+    # Early token validation
+    if not canvas_access_token or not str(canvas_access_token).strip():
+        raise HTTPException(status_code=401, detail="Canvas access token is required.")
+
+    #Validate Course IDs
+    if not course_id_to_pull or not course_id_to_push:
+        raise HTTPException(status_code=400, detail="Course IDs must both be filled")
+
+    #Create Temp Directory
+    temp_dir = create_temp_dir()
+    try:
+        grades_fetcher = CanvasGradesFetcher(access_token=canvas_access_token)
+
+        #Fetch course info - Syllabus and Term
+        course_info = grades_fetcher.api_request(
+            endpoint_or_url=f"courses/{course_id_to_pull}", params={"include[]": ["syllabus_body", "term"]}
+        )
+
+        if not course_info:
+            raise HTTPException(
+                status_code=404, detail="Course not found or invalid token."
+            )
+        
+        course_code = course_info.get("course_code", "course")  # e.g., CSE100
+        semester_code = get_semester_short_code(
+            course_info.get("term", {}).get("name", "")
+        )  # e.g., f25
+
+        full_semester_name = f"{semester_code}_{sanitize_filename(course_code)}"
+
+        #Fetch all assignments including the rubric. 
+        all_assignments = get_all_assignments(course_id_to_pull, grades_fetcher)
+        if not all_assignments:
+            raise HTTPException(
+                status_code=404, detail="No assignments found in the course."
+            )
+        
+        # Data Gathering Phase (Always Runs)
+        assignment_texts_map = {}
+        logger.info("Starting Data Gathering Phase")
+        for assignment in all_assignments:
+            logger.info("Gathering artifacts for: %s", assignment["name"])
+            local_files, extracted_texts = extract_and_save_artifacts(
+                assignment, grades_fetcher, course_code, semester_code, temp_dir
+            )
+            assignment_texts_map[assignment["id"]] = extracted_texts
+
+            sanitized_name = sanitize_filename(assignment["name"])
+            assignment_folder_path = os.path.join(
+                temp_dir, f"{assignment['id']}_{sanitized_name}"
+            )
+            report_path = generate_assignment_grade_report(
+                grades_fetcher, assignment, assignment_folder_path
+            )
+            if report_path:
+                local_files.append(report_path)
+            
+            if local_files:
+                logger.info("Uploading artifacts for '%s'...", assignment["name"])
+                canvas_folder = f"{full_semester_name}/Test_Assignments/{sanitized_name}"
+                grades_fetcher.upload_files(course_id_to_push, canvas_folder, local_files)
+            else:
+                logger.info("No artifacts found to upload for this assignment.")
+
+        logger.info("Data Gathering Complete")
+
+    except Exception as e: 
+        ...
+
+    finally:
+        cleanup_temp_dir(temp_dir)
 
 if __name__ == "__main__":
     import uvicorn
