@@ -415,6 +415,12 @@ class CanvasGradesFetcher:
             )
             return None
 
+    def fetch_assignment_groups(self, course_id: int) -> List[Dict[str, Any]]:
+        logger.info(f"Generating Assignment Groups for course: {course_id}")
+
+        endpoint = f"courses/{course_id}/assignment_groups"
+        assignment_groups = self.get_paginated_list(endpoint=endpoint)
+        return assignment_groups
 
 if __name__ == "__main__":
     try:
