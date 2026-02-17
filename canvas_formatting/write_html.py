@@ -438,19 +438,21 @@ def main():
    
 
     # add placeholder modules:
-    upload_module_to_canvas(DESTINATION_COURSE_ID, "Assessment Instruments and Student Work Samples")
-    upload_module_to_canvas(DESTINATION_COURSE_ID, "CSE Capstone Course Showcases")    
-    upload_module_to_canvas(DESTINATION_COURSE_ID, "Student and Credit Transfer")
-    upload_module_to_canvas(DESTINATION_COURSE_ID, "CSE Faculty Meeting Minutes")
+   # upload_module_to_canvas(DESTINATION_COURSE_ID, "Assessment Instruments and Student Work Samples")
+   # upload_module_to_canvas(DESTINATION_COURSE_ID, "CSE Capstone Course Showcases")    
+   # upload_module_to_canvas(DESTINATION_COURSE_ID, "Student and Credit Transfer")
+   # upload_module_to_canvas(DESTINATION_COURSE_ID, "CSE Faculty Meeting Minutes")
 
     # add course folder module
     module_name = f"Courses - Course Folders and Student Work Samples ({semester.capitalize()} {year})"
-    module = upload_module_to_canvas(DESTINATION_COURSE_ID, module_name)
+   # module = upload_module_to_canvas(DESTINATION_COURSE_ID, module_name)
 
     # set_up_abet_page()
+
+    # Add course page to canvas
     set_up_course_page(file_folders, files, course_code, course_name, semester, year)
-    page = add_to_canvas(course_code, course_name, semester, year)
-    add_single_module_item(DESTINATION_COURSE_ID, module.get("id"), page)
+    #page = add_to_canvas(course_code, course_name, semester, year)
+    #add_single_module_item(DESTINATION_COURSE_ID, module.get("id"), page)
 
 if __name__ == "__main__":
     main()
