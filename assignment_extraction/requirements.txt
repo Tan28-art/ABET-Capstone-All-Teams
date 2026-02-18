@@ -5,3 +5,4 @@ python-docx
 PyPDF2
 xhtml2pdf
 python-multipart
+httpx

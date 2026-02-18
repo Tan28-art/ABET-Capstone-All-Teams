@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from fetch_grades import CanvasGradesFetcher
 from fastapi import FastAPI, HTTPException, Header, UploadFile, File, Query
 from fastapi.responses import JSONResponse
-from typing import Annotated, Optional
+from typing import Annotated, Optional, List
 import PyPDF2
 import docx
 from csv_filter import RosterMap, parse_roster_for_major_map
@@ -1068,85 +1068,87 @@ def generate_report_json(
         cleanup_temp_dir(temp_dir)
 
 
-@app.post("/move-data-between-courses/{course_id_to_pull}/{course_id_to_push}")
-def move_data_between_courses(course_id_to_pull: str, 
-                              course_id_to_push: str,
-                              canvas_access_token: Annotated[str, Header()]):
+@app.post("/move-data-between-courses/{course_id_to_push}")
+def move_data_between_courses(course_id_to_push: str,
+                              canvas_access_token: Annotated[str, Header()],
+                              course_ids_to_pull: Annotated[List[str] , Query(min_length=1, description="Enter all Course IDs to pull from")],
+                              ):
+    #Validate Course IDs
+    if not course_ids_to_pull or not course_id_to_push:
+        raise HTTPException(status_code=400, detail="Course IDs must both be filled")
+
     # Early token validation
     if not canvas_access_token or not str(canvas_access_token).strip():
         raise HTTPException(status_code=401, detail="Canvas access token is required.")
-
-    #Validate Course IDs
-    if not course_id_to_pull or not course_id_to_push:
-        raise HTTPException(status_code=400, detail="Course IDs must both be filled")
 
     #Create Temp Directory
     temp_dir = create_temp_dir()
     try:
         grades_fetcher = CanvasGradesFetcher(access_token=canvas_access_token)
 
-        #Fetch course info - Syllabus and Term
-        course_info = grades_fetcher.api_request(
-            endpoint_or_url=f"courses/{course_id_to_pull}", params={"include[]": ["syllabus_body", "term"]}
-        )
-
-        if not course_info:
-            raise HTTPException(
-                status_code=404, detail="Course not found or invalid token."
+        for course_id_to_pull in course_ids_to_pull:
+            #Fetch course info - Syllabus and Term
+            course_info = grades_fetcher.api_request(
+                endpoint_or_url=f"courses/{course_id_to_pull}", params={"include[]": ["syllabus_body", "term"]}
             )
 
-        course_code = course_info.get("course_code", "course")
-        semester_code = get_semester_short_code(
-            course_info.get("term", {}).get("name", "")
-        )  # e.g., f25
+            if not course_info:
+                raise HTTPException(
+                    status_code=404, detail="Course not found or invalid token."
+                )
 
-        course_folder_name = re.sub(r'[<>:"/\\|?*]', "", course_info.get("name") or course_code)
+            course_code = course_info.get("course_code", "course")
+            semester_code = get_semester_short_code(
+                course_info.get("term", {}).get("name", "")
+            )  # e.g., f25
 
-        #Fetch all assignments including the rubric. 
-        all_assignments = get_all_assignments(course_id_to_pull, grades_fetcher)
-        if not all_assignments:
-            raise HTTPException(
-                status_code=404, detail="No assignments found in the course."
-            )
-        
-        # Data Gathering Phase (Always Runs)
-        logger.info("Starting Data Gathering Phase")
+            course_folder_name = re.sub(r'[<>:"/\\|?*]', "", course_info.get("name") or course_code)
 
-        # Prefetch all submissions once and index by assignment
-        all_submissions = grades_fetcher.fetch_all_course_submissions(int(course_id_to_pull))
-        submissions_by_assignment = defaultdict(list)
-        for sub in all_submissions:
-            submissions_by_assignment[sub["assignment_id"]].append(sub)
-
-        for assignment in all_assignments:
-            local_files, extracted_texts = extract_and_save_artifacts(  # fix: was discarding local_files
-                assignment,
-                grades_fetcher,
-                temp_dir,
-                prefetched_submissions=submissions_by_assignment.get(assignment["id"]),
-            )
-
-            sanitized_name = sanitize_filename(assignment["name"])
-            assignment_folder_path = os.path.join(
-                temp_dir, f"{assignment['id']}_{sanitized_name}"
-            )
-            report_path = generate_assignment_grade_report(
-                grades_fetcher,
-                assignment,
-                assignment_folder_path,
-                prefetched_submissions=submissions_by_assignment.get(assignment["id"]), 
-            )
-            if report_path:
-                local_files.append(report_path)
+            #Fetch all assignments including the rubric. 
+            all_assignments = get_all_assignments(course_id_to_pull, grades_fetcher)
+            if not all_assignments:
+                raise HTTPException(
+                    status_code=404, detail="No assignments found in the course."
+                )
             
-            if local_files:
-                logger.info("Uploading artifacts for '%s'...", assignment["name"])
-                canvas_folder = f"{course_folder_name}/Test_Assignments/{sanitized_name}"
-                grades_fetcher.upload_files(course_id_to_push, canvas_folder, local_files)
-            else:
-                logger.info("No artifacts found to upload for this assignment.")
+            # Data Gathering Phase (Always Runs)
+            logger.info("Starting Data Gathering Phase")
 
-        logger.info("Data Gathering Complete")
+            # Prefetch all submissions once and index by assignment
+            all_submissions = grades_fetcher.fetch_all_course_submissions(int(course_id_to_pull))
+            submissions_by_assignment = defaultdict(list)
+            for sub in all_submissions:
+                submissions_by_assignment[sub["assignment_id"]].append(sub)
+
+            for assignment in all_assignments:
+                local_files, extracted_texts = extract_and_save_artifacts(  # fix: was discarding local_files
+                    assignment,
+                    grades_fetcher,
+                    temp_dir,
+                    prefetched_submissions=submissions_by_assignment.get(assignment["id"]),
+                )
+
+                sanitized_name = sanitize_filename(assignment["name"])
+                assignment_folder_path = os.path.join(
+                    temp_dir, f"{assignment['id']}_{sanitized_name}"
+                )
+                report_path = generate_assignment_grade_report(
+                    grades_fetcher,
+                    assignment,
+                    assignment_folder_path,
+                    prefetched_submissions=submissions_by_assignment.get(assignment["id"]), 
+                )
+                if report_path:
+                    local_files.append(report_path)
+                
+                if local_files:
+                    logger.info("Uploading artifacts for '%s'...", assignment["name"])
+                    canvas_folder = f"{course_folder_name}/Test_Assignments/{sanitized_name}"
+                    grades_fetcher.upload_files(course_id_to_push, canvas_folder, local_files)
+                else:
+                    logger.info("No artifacts found to upload for this assignment.")
+
+            logger.info("Data Gathering Complete")
         return {"message": "Data transfer complete."}  # fix: was missing return
 
     except HTTPException:
