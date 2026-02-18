@@ -180,17 +180,15 @@ def get_semester_short_code(term_name: str) -> str:
     return "term"
 
 
-def generate_filename(course_code, semester, assignment_name, label, extension):
-    """Generates format like: cse100-f20-assignment_name-high.pdf"""
-    clean_course = sanitize_filename(course_code).replace("_", "")
+def generate_filename(assignment_name, label, extension):
+    """Generates format like: high-Homework_1.pdf"""
     clean_assign = sanitize_filename(assignment_name)
-    return f"{clean_course}-{semester}-{clean_assign}-{label}{extension}"
+    return f"{label}-{clean_assign}{extension}"
 
 
 def sanitize_filename(name: str) -> str:
-    """Replaces characters that are invalid in Windows/Linux filenames with an underscore."""
-    name = name.replace(" ", "_")
-    return re.sub(r'[<>:"/\\|?*]', "_", name)
+    """Replaces characters that are invalid in Windows/Linux filenames"""
+    return re.sub(r'[<>:"/\\|?*]', "", name).strip()
 
 
 def extract_and_save_syllabus(
@@ -308,14 +306,22 @@ def find_abet_outcomes(all_assignments: list[dict]) -> tuple[defaultdict, dict]:
 
 
 def get_representative_submissions(
-    course_id: str, assignment_id: int, client: CanvasGradesFetcher
+    course_id: str,
+    assignment_id: int,
+    client: CanvasGradesFetcher,
+    prefetched_submissions: list[dict] | None = None,
 ) -> tuple[dict | None, dict | None, dict | None]:
     """
     Fetches submissions and identifies High, Average, and Low graded artifacts.
-    """
-    endpoint = f"courses/{course_id}/assignments/{assignment_id}/submissions"
 
-    submissions = client.get_paginated_list(endpoint, params={"include[]": "user"})
+    Accepts optional `prefetched_submissions` to avoid per-assignment API calls
+    when callers have already fetched submissions in bulk.
+    """
+    if prefetched_submissions is not None:
+        submissions = prefetched_submissions
+    else:
+        endpoint = f"courses/{course_id}/assignments/{assignment_id}/submissions"
+        submissions = client.get_paginated_list(endpoint, params={"include[]": "user"})
 
     if not submissions:
         return None, None, None
@@ -351,8 +357,6 @@ def _save_representative_submission(
     sub: dict,
     label: str,
     assignment: dict,
-    course_code: str,
-    semester_code: str,
     local_path: str,
     client: CanvasGradesFetcher,
 ) -> list[str]:
@@ -367,9 +371,7 @@ def _save_representative_submission(
     attachment = sub["attachments"][0]
     ext = os.path.splitext(attachment.get("filename", ""))[1]
 
-    new_filename = generate_filename(
-        course_code, semester_code, assignment["name"], label, ext
-    )
+    new_filename = generate_filename(assignment["name"], label, ext)
     file_save_path = os.path.join(local_path, new_filename)
 
     if client.download_file(attachment["url"], file_save_path):
@@ -395,9 +397,8 @@ def _save_representative_submission(
 def extract_and_save_artifacts(
     assignment: dict,
     client: CanvasGradesFetcher,
-    course_code: str,
-    semester_code: str,
     temp_dir: str,
+    prefetched_submissions: list[dict] | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     """
     Saves all relevant artifacts for an assignment to a local temporary directory.
@@ -451,13 +452,13 @@ def extract_and_save_artifacts(
         saved_files.append(path)    
 
     high, avg, low = get_representative_submissions(
-        assignment["course_id"], assignment["id"], client
+        assignment["course_id"], assignment["id"], client, prefetched_submissions=prefetched_submissions
     )
 
     for sub, label in [(high, "high"), (avg, "avg"), (low, "low")]:
         saved_files.extend(
             _save_representative_submission(
-                sub, label, assignment, course_code, semester_code, local_path, client
+                sub, label, assignment, local_path, client
             )
         )
 
@@ -465,7 +466,10 @@ def extract_and_save_artifacts(
 
 
 def generate_assignment_grade_report(
-    grades_fetcher: CanvasGradesFetcher, assignment: dict, local_path: str
+    grades_fetcher: CanvasGradesFetcher,
+    assignment: dict,
+    local_path: str,
+    prefetched_submissions: list[dict] | None = None,
 ) -> str | None:
     """
     Creates a detailed CSV grade report for a single assignment.
@@ -474,14 +478,20 @@ def generate_assignment_grade_report(
         grades_fetcher (CanvasGradesFetcher): The fetcher instance to get data.
         assignment (dict): The assignment object.
         local_path (str): The local directory to save the report in.
+        prefetched_submissions (list[dict] | None): Optionally supply submissions
+            already fetched in bulk to avoid another API call.
 
     Returns:
         str or None: The file path to the generated CSV, or None if no submissions exist.
     """
     logger.info("Generating detailed grade report...")
-    submissions = grades_fetcher.fetch_assignment_submissions(
-        assignment["course_id"], assignment["id"]
-    )
+    if prefetched_submissions is not None:
+        submissions = prefetched_submissions
+    else:
+        submissions = grades_fetcher.fetch_assignment_submissions(
+            assignment["course_id"], assignment["id"]
+        )
+
     if not submissions:
         logger.info("No submissions found.")
         return None
@@ -526,7 +536,54 @@ def build_outcome_report_data(
         "Building ABET Outcome Report Data with Major Breakdown and File Content"
     )
     outcome_reports = []
-    submission_cache = {}  # {assignment_id: [submissions]} — avoids re-fetching
+
+    # Prefetch submissions in bulk for all assignments referenced by outcomes.
+    # This replaces the previous per-assignment N+1 fetching and is batched
+    # to respect Canvas' limit on assignment_ids[] (≈50 per request).
+    all_assignment_ids = set()
+    for assignments in outcome_map.values():
+        for assign in assignments:
+            all_assignment_ids.add(assign["id"])
+
+    all_assignment_ids_list = list(all_assignment_ids)
+    all_submissions_flat: list[dict] = []
+    BATCH_SIZE = 50
+    for i in range(0, len(all_assignment_ids_list), BATCH_SIZE):
+        batch = all_assignment_ids_list[i : i + BATCH_SIZE]
+        try:
+            all_submissions_flat.extend(
+                grades_fetcher.fetch_all_course_submissions(int(course_id), assignment_ids=batch)
+            )
+        except Exception as e:
+            logger.warning("Bulk submissions fetch failed for batch %s: %s", batch, e)
+
+    # If bulk fetch returned useful data, index by assignment_id. Otherwise,
+    # fall back to the original per-assignment fetch behavior to guarantee
+    # that `full_rubric_assessment` is present (critical for ABET extraction).
+    submission_cache = defaultdict(list)
+    if all_submissions_flat:
+        # Detect whether bulk responses include full_rubric_assessment
+        has_rubric_data = any(
+            sub.get("full_rubric_assessment") is not None for sub in all_submissions_flat
+        )
+
+        if has_rubric_data:
+            for sub in all_submissions_flat:
+                # submissions returned by the bulk endpoint include assignment_id
+                submission_cache[sub["assignment_id"]].append(sub)
+        else:
+            # Roll back to per-assignment fetching if rubric details are missing
+            logger.warning(
+                "Bulk submissions missing `full_rubric_assessment`. Falling back to per-assignment fetch."
+            )
+            for aid in all_assignment_ids_list:
+                submission_cache[aid] = grades_fetcher.fetch_assignment_submissions(
+                    course_id, aid
+                )
+    else:
+        # No bulk data returned. Use per-assignment fetch.
+        for aid in all_assignment_ids_list:
+            submission_cache[aid] = grades_fetcher.fetch_assignment_submissions(course_id, aid)
 
     for outcome_id, assignments in outcome_map.items():
         outcome_info = outcome_details.get(outcome_id, {})
@@ -536,8 +593,10 @@ def build_outcome_report_data(
             "Processing Outcome: '%s' (Outcome ID: %s)", outcome_title, outcome_id
         )
 
-        all_outcome_submissions = []
-        major_buckets = defaultdict(list)
+        # Per-student aggregation for this outcome: key=user_id -> {
+        #   'score_sum': float, 'possible_sum': float, 'major': str|None
+        # }
+        student_outcomes: dict[int, dict] = {}
         contributing_assignments_data = []
 
         for assign in assignments:
@@ -563,11 +622,7 @@ def build_outcome_report_data(
 
             abet_points_possible = abet_criterion.get("points") or 1
             assign_id = assign["id"]
-            if assign_id not in submission_cache:
-                submission_cache[assign_id] = (
-                    grades_fetcher.fetch_assignment_submissions(course_id, assign_id)
-                )
-            submissions = submission_cache[assign_id]
+            submissions = submission_cache.get(assign_id, [])
             logger.debug(
                 "Fetched %d submissions. Parsing for rubric assessments...",
                 len(submissions),
@@ -577,39 +632,41 @@ def build_outcome_report_data(
                 if assessment := sub.get("full_rubric_assessment"):
                     for graded_criterion in assessment.get("data", []):
                         if graded_criterion.get("learning_outcome_id") == outcome_id:
-                            sub["_abet_score"] = graded_criterion.get("points", 0)
-                            sub["_abet_points_possible"] = abet_points_possible
-                            all_outcome_submissions.append(sub)
+                            score = graded_criterion.get("points", 0)
+                            user_id = sub.get("user_id")
+
+                            # If submission does not expose a top-level user_id, skip it
+                            if user_id is None:
+                                break
 
                             logger.debug(
                                 "Found relevant score for Submission ID %s. Score: %s/%s",
                                 sub["id"],
-                                sub["_abet_score"],
-                                sub["_abet_points_possible"],
+                                score,
+                                abet_points_possible,
                             )
 
-                            # Match student to major:
-                            # ASURITE column -> login_id,  ID column -> sis_user_id
-                            if user_data := sub.get("user"):
+                            # Initialize per-student accumulator on first seeing student
+                            if user_id not in student_outcomes:
                                 major = None
-                                matched_key = None
-                                if student_major_map.by_asurite:
-                                    login_id = user_data.get("login_id", "")
-                                    major = student_major_map.by_asurite.get(login_id)
-                                    if major:
-                                        matched_key = login_id
-                                if not major and student_major_map.by_id:
-                                    sis_id = str(user_data.get("sis_user_id", ""))
-                                    major = student_major_map.by_id.get(sis_id)
-                                    if major:
-                                        matched_key = sis_id
-                                if major:
-                                    major_buckets[major].append(sub)
-                                    logger.debug(
-                                        "Matched to Major '%s' for user '%s'.",
-                                        major,
-                                        matched_key,
-                                    )
+                                if user_data := sub.get("user"):
+                                    if student_major_map.by_asurite:
+                                        login_id = user_data.get("login_id", "")
+                                        major = student_major_map.by_asurite.get(login_id)
+                                    if not major and student_major_map.by_id:
+                                        sis_id = str(user_data.get("sis_user_id", ""))
+                                        major = student_major_map.by_id.get(sis_id)
+
+                                student_outcomes[user_id] = {
+                                    "score_sum": 0.0,
+                                    "possible_sum": 0.0,
+                                    "major": major,
+                                }
+
+                            # Accumulate weighted totals for this student
+                            student_outcomes[user_id]["score_sum"] += score
+                            student_outcomes[user_id]["possible_sum"] += abet_points_possible
+
                             break  # Move to the next submission
 
             assignment_info = assign.copy()
@@ -618,48 +675,53 @@ def build_outcome_report_data(
             )
             contributing_assignments_data.append(assignment_info)
 
-        logger.debug(
-            "Data gathering complete. Total relevant submissions: %d. Students matched to a major: %d",
-            len(all_outcome_submissions),
-            sum(len(subs) for subs in major_buckets.values()),
-        )
-
-        if not all_outcome_submissions:
+        if not student_outcomes:
             logger.warning(
                 "Skipping report for '%s'. No relevant rubric-graded submissions found.",
                 outcome_title,
             )
             continue
 
-        # Compute major-specific competency results
+        logger.debug(
+            "Data gathering complete. Unique students assessed: %d",
+            len(student_outcomes),
+        )
+
+        # Group students by major using their weighted averages
+        major_buckets = defaultdict(list)
+        for uid, data in student_outcomes.items():
+            if data.get("major"):
+                weighted_avg = (
+                    data["score_sum"] / data["possible_sum"]
+                    if data["possible_sum"]
+                    else 0
+                )
+                major_buckets[data["major"]].append(weighted_avg)
+
         major_specific_results = {}
-        for major, subs in major_buckets.items():
-            num_competent = sum(
-                1
-                for s in subs
-                if (s["_abet_score"] / s["_abet_points_possible"]) >= 0.7
-            )
-            total_graded = len(subs)
+        for major, averages in major_buckets.items():
+            num_competent = sum(1 for avg in averages if avg >= 0.7)
+            total_students = len(averages)
             percent_competent = (
-                (num_competent / total_graded) * 100 if total_graded else 0
+                (num_competent / total_students) * 100 if total_students else 0
             )
             major_specific_results[major] = {
-                "sample_size": total_graded,
+                "sample_size": total_students,
                 "number_competent": num_competent,
                 "percent_competent": round(percent_competent, 2),
                 "outcome_met": percent_competent >= 70.0,
             }
 
-        # Compute overall competency results
-        overall_num_competent = sum(
-            1
-            for s in all_outcome_submissions
-            if (s["_abet_score"] / s["_abet_points_possible"]) >= 0.7
-        )
-        overall_total_graded = len(all_outcome_submissions)
+        # Compute overall competency results from per-student weighted averages
+        all_weighted_averages = [
+            (data["score_sum"] / data["possible_sum"]) if data["possible_sum"] else 0
+            for data in student_outcomes.values()
+        ]
+        overall_num_competent = sum(1 for avg in all_weighted_averages if avg >= 0.7)
+        overall_total_students = len(all_weighted_averages)
         overall_percent_competent = (
-            (overall_num_competent / overall_total_graded) * 100
-            if overall_total_graded
+            (overall_num_competent / overall_total_students) * 100
+            if overall_total_students
             else 0
         )
 
@@ -684,10 +746,12 @@ def build_outcome_report_data(
                 "description": outcome_info.get("full_description", ""),
                 "long_description": outcome_info.get("long_description", ""),
             },
+            # Course identification
+            "course_identification": course_info,
             # Corresponds to requirement 1.e (Results)
             "results": {
                 "overall_summary": {
-                    "sample_size": overall_total_graded,
+                    "sample_size": overall_total_students,
                     "number_competent": overall_num_competent,
                     "percent_competent": round(overall_percent_competent, 2),
                     "outcome_met": overall_percent_competent >= 70.0,
@@ -723,7 +787,7 @@ def generate_outcome_reports(
     outcome_map,
     outcome_details,
     course_info,
-    semester_code,
+    course_folder_name: str,
     course_id: str,
     student_major_map: RosterMap,
     assignment_texts_map: dict,
@@ -756,7 +820,7 @@ def generate_outcome_reports(
         local_reports_to_upload.append(report_path)
 
     if local_reports_to_upload:
-        canvas_folder = f"{semester_code}/_ABET_Outcome_Reports"
+        canvas_folder = f"{course_folder_name}/_ABET_Outcome_Reports"
         grades_fetcher.upload_files(course_id, canvas_folder, local_reports_to_upload)
 
 
@@ -797,12 +861,12 @@ def process_course_with_roster(
                 status_code=404, detail="Course not found or invalid token."
             )
 
-        course_code = course_info.get("course_code", "course")  # e.g., CSE100
+        course_code = course_info.get("course_code", "course")  # e.g., "2023Fall-T-CSE423-70483" for a real course
         semester_code = get_semester_short_code(
             course_info.get("term", {}).get("name", "")
         )  # e.g., f25
 
-        full_semester_name = f"{semester_code}_{sanitize_filename(course_code)}"
+        course_folder_name = re.sub(r'[<>:"/\\|?*]', "", course_info.get("name") or course_code) 
 
         all_assignments = get_all_assignments(course_id, grades_fetcher)
         if not all_assignments:
@@ -820,17 +884,28 @@ def process_course_with_roster(
                 ]
                 grades_fetcher.upload_files(
                     course_id,
-                    f"{full_semester_name}/Syllabus",
+                    f"{course_folder_name}/Syllabus",
                     syllabus_files,
                 )
 
         # Data Gathering Phase (Always Runs)
         assignment_texts_map = {}
         logger.info("Starting Data Gathering Phase")
+
+        # Prefetch all submissions once and index by assignment_id to avoid
+        # redundant per-assignment API calls.
+        all_submissions = grades_fetcher.fetch_all_course_submissions(int(course_id))
+        submissions_by_assignment = defaultdict(list)
+        for sub in all_submissions:
+            submissions_by_assignment[sub["assignment_id"]].append(sub)
+
         for assignment in all_assignments:
             logger.info("Gathering artifacts for: %s", assignment["name"])
             local_files, extracted_texts = extract_and_save_artifacts(
-                assignment, grades_fetcher, course_code, semester_code, temp_dir
+                assignment,
+                grades_fetcher,
+                temp_dir,
+                prefetched_submissions=submissions_by_assignment.get(assignment["id"]),
             )
             assignment_texts_map[assignment["id"]] = extracted_texts
 
@@ -839,7 +914,10 @@ def process_course_with_roster(
                 temp_dir, f"{assignment['id']}_{sanitized_name}"
             )
             report_path = generate_assignment_grade_report(
-                grades_fetcher, assignment, assignment_folder_path
+                grades_fetcher,
+                assignment,
+                assignment_folder_path,
+                prefetched_submissions=submissions_by_assignment.get(assignment["id"]),
             )
             if report_path:
                 local_files.append(report_path)
@@ -847,7 +925,7 @@ def process_course_with_roster(
             if tasks in (TaskType.EXTRACT, TaskType.ALL):
                 if local_files:
                     logger.info("Uploading artifacts for '%s'...", assignment["name"])
-                    canvas_folder = f"{full_semester_name}/Assignments/{sanitized_name}"
+                    canvas_folder = f"{course_folder_name}/Assignments/{sanitized_name}"
                     grades_fetcher.upload_files(course_id, canvas_folder, local_files)
                 else:
                     logger.info("No artifacts found to upload for this assignment.")
@@ -865,7 +943,7 @@ def process_course_with_roster(
                         outcome_map,
                         outcome_details,
                         course_info,
-                        full_semester_name,
+                        course_folder_name,
                         course_id,
                         student_major_map,
                         assignment_texts_map,
@@ -924,9 +1002,19 @@ def generate_report_json(
 
         # Gather extracted texts for each assignment (needs temp files for PDF/DOCX extraction)
         assignment_texts_map = {}
+
+        # Prefetch all submissions once and index by assignment 
+        all_submissions = grades_fetcher.fetch_all_course_submissions(int(course_id))
+        submissions_by_assignment = defaultdict(list)
+        for sub in all_submissions:
+            submissions_by_assignment[sub["assignment_id"]].append(sub)
+
         for assignment in all_assignments:
             _, extracted_texts = extract_and_save_artifacts(
-                assignment, grades_fetcher, course_code, semester_code, temp_dir
+                assignment,
+                grades_fetcher,
+                temp_dir,
+                prefetched_submissions=submissions_by_assignment.get(assignment["id"]),
             )
             assignment_texts_map[assignment["id"]] = extracted_texts
 
@@ -954,7 +1042,7 @@ def generate_report_json(
             assignment_texts_map,
         )
 
-        # Wrap in the metadata envelope
+        # Wrap in the metadata 
         response_payload = {
             "metadata": {
                 "course_id": str(course_id),
@@ -962,8 +1050,8 @@ def generate_report_json(
                 "semester": semester_code,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
-            # Corresponds to requirement 1.c (Class number)
-            "course_identification": course_info,
+            # # Corresponds to requirement 1.c (Class number)
+            # "course_identification": course_info,
             "outcomes": [
                 {
                     "outcome_id": report["outcome_id"],
@@ -1006,13 +1094,13 @@ def move_data_between_courses(course_id_to_pull: str,
             raise HTTPException(
                 status_code=404, detail="Course not found or invalid token."
             )
-        
-        course_code = course_info.get("course_code", "course")  # e.g., CSE100
+
+        course_code = course_info.get("course_code", "course")
         semester_code = get_semester_short_code(
             course_info.get("term", {}).get("name", "")
         )  # e.g., f25
 
-        full_semester_name = f"{semester_code}_{sanitize_filename(course_code)}"
+        course_folder_name = re.sub(r'[<>:"/\\|?*]', "", course_info.get("name") or course_code)
 
         #Fetch all assignments including the rubric. 
         all_assignments = get_all_assignments(course_id_to_pull, grades_fetcher)
@@ -1022,37 +1110,50 @@ def move_data_between_courses(course_id_to_pull: str,
             )
         
         # Data Gathering Phase (Always Runs)
-        assignment_texts_map = {}
         logger.info("Starting Data Gathering Phase")
+
+        # Prefetch all submissions once and index by assignment
+        all_submissions = grades_fetcher.fetch_all_course_submissions(int(course_id_to_pull))
+        submissions_by_assignment = defaultdict(list)
+        for sub in all_submissions:
+            submissions_by_assignment[sub["assignment_id"]].append(sub)
+
         for assignment in all_assignments:
-            logger.info("Gathering artifacts for: %s", assignment["name"])
-            local_files, extracted_texts = extract_and_save_artifacts(
-                assignment, grades_fetcher, course_code, semester_code, temp_dir
+            local_files, extracted_texts = extract_and_save_artifacts(  # fix: was discarding local_files
+                assignment,
+                grades_fetcher,
+                temp_dir,
+                prefetched_submissions=submissions_by_assignment.get(assignment["id"]),
             )
-            assignment_texts_map[assignment["id"]] = extracted_texts
 
             sanitized_name = sanitize_filename(assignment["name"])
             assignment_folder_path = os.path.join(
                 temp_dir, f"{assignment['id']}_{sanitized_name}"
             )
             report_path = generate_assignment_grade_report(
-                grades_fetcher, assignment, assignment_folder_path
+                grades_fetcher,
+                assignment,
+                assignment_folder_path,
+                prefetched_submissions=submissions_by_assignment.get(assignment["id"]), 
             )
             if report_path:
                 local_files.append(report_path)
             
             if local_files:
                 logger.info("Uploading artifacts for '%s'...", assignment["name"])
-                canvas_folder = f"{full_semester_name}/Test_Assignments/{sanitized_name}"
+                canvas_folder = f"{course_folder_name}/Test_Assignments/{sanitized_name}"
                 grades_fetcher.upload_files(course_id_to_push, canvas_folder, local_files)
             else:
                 logger.info("No artifacts found to upload for this assignment.")
 
         logger.info("Data Gathering Complete")
+        return {"message": "Data transfer complete."}  # fix: was missing return
 
-    except Exception as e: 
-        ...
-
+    except HTTPException:
+        raise  
+    except Exception as e:
+        logger.error("Unexpected error in move_data_between_courses: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         cleanup_temp_dir(temp_dir)
 

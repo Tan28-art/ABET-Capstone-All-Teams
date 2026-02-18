@@ -45,31 +45,83 @@ class CanvasGradesFetcher:
             raise ValueError("Canvas access token not found.")
         return token
 
+    def _adaptive_sleep(self, response: requests.Response):
+        """Sleep adaptively based on Canvas rate limit headers.
+
+        Uses the X-Rate-Limit-Remaining header to throttle only when
+        remaining capacity is low.  No sleep when bucket is healthy.
+        """
+        try:
+            remaining = float(response.headers.get("X-Rate-Limit-Remaining", 700))
+        except Exception:
+            remaining = 700.0
+
+        if remaining < 50:
+            time.sleep(5.0)
+        elif remaining < 100:
+            time.sleep(2.0)
+        elif remaining < 200:
+            time.sleep(0.5)
+        elif remaining < 350:
+            time.sleep(0.1)
+        # else: no sleep needed
+
     def _get_paginated_list(
         self, url: Optional[str], params: Optional[Dict] = None
     ) -> List[Dict[str, Any]]:
-        """Helper function to handle pagination for any Canvas API endpoint."""
+        """Helper function to handle pagination for any Canvas API endpoint.
+
+        Implements adaptive sleeping based on response headers and retries
+        when Canvas responds with a rate-limit (403/429 + "Rate Limit").
+        """
         all_items = []
         current_params = params or {}
         current_params.setdefault("per_page", 100)
 
         while url:
             try:
-                time.sleep(0.2)  # Rate-limit pacing
-                response = self.session.get(url, params=current_params)
-                response.raise_for_status()
-                all_items.extend(response.json())
+                # Retry loop specifically for rate-limited responses
+                for attempt in range(3):
+                    response = self.session.get(url, params=current_params)
 
-                url = None
-                if "Link" in response.headers:
-                    links = requests.utils.parse_header_links(response.headers["Link"])
-                    url = next(
-                        (link["url"] for link in links if link.get("rel") == "next"),
-                        None,
-                    )
+                    # If Canvas signals rate limiting, wait and retry
+                    if response.status_code in (403, 429) and "Rate Limit" in (
+                        response.text or ""
+                    ):
+                        logger.warning("Rate limited. Sleeping 10s and retrying...")
+                        time.sleep(10.0)
+                        continue
 
-                # The 'next' URL provided by Canvas includes all necessary parameters.
-                current_params = None
+                    # Raise for other HTTP errors
+                    response.raise_for_status()
+
+                    # Successful response — use adaptive pacing based on headers
+                    self._adaptive_sleep(response)
+
+                    # Append page items
+                    try:
+                        page_items = response.json()
+                    except ValueError:
+                        page_items = []
+                    all_items.extend(page_items)
+
+                    # Discover next page from Link header (if present)
+                    url = None
+                    if "Link" in response.headers:
+                        links = requests.utils.parse_header_links(response.headers["Link"])
+                        url = next(
+                            (link["url"] for link in links if link.get("rel") == "next"),
+                            None,
+                        )
+
+                    # The 'next' URL provided by Canvas includes all necessary parameters.
+                    current_params = None
+
+                    break  # exit retry loop on success
+                else:
+                    # Exhausted retries for rate limiting — log and stop.
+                    logger.error("Exceeded retry attempts due to rate limiting for %s", url)
+                    break
 
             except requests.exceptions.RequestException as e:
                 logger.error(f"Error during paginated fetch from {url}: {e}")
@@ -87,24 +139,44 @@ class CanvasGradesFetcher:
         """
         Performs a single, non-paginated API request to Canvas.
 
-        Returns:
-            - JSON dict for normal requests
-            - Response object if stream=True
-            - None on error
+        Adds adaptive sleeping and retry-on-rate-limit behavior while keeping
+        the original return semantics.
         """
         url = endpoint_or_url
         if not url.startswith("https://"):
             url = f"{self.canvas_domain}/api/v1/{endpoint_or_url}"
 
         try:
-            time.sleep(0.2)
-            response = self.session.request(
-                method, url, params=params, data=data, stream=stream
-            )
-            response.raise_for_status()
-            if stream:
-                return response
-            return response.json() if response.text else {"status": "success"}
+            for attempt in range(3):
+                response = self.session.request(
+                    method, url, params=params, data=data, stream=stream
+                )
+
+                # Handle explicit Canvas rate-limit responses by pausing and retrying
+                if response.status_code in (403, 429) and "Rate Limit" in (
+                    response.text or ""
+                ):
+                    logger.warning("Rate limited. Sleeping 10s and retrying...")
+                    time.sleep(10.0)
+                    continue
+
+                # Raise for other HTTP errors
+                response.raise_for_status()
+
+                # Apply adaptive sleep based on response headers
+                try:
+                    self._adaptive_sleep(response)
+                except Exception:
+                    pass
+
+                if stream:
+                    return response
+                return response.json() if response.text else {"status": "success"}
+
+            # Exhausted rate-limit retries
+            logger.error("Exceeded retry attempts due to rate limiting for %s", url)
+            return None
+
         except requests.exceptions.RequestException as e:
             logger.error(
                 "API Error on %s %s: %s | Response: %s",
@@ -207,7 +279,6 @@ class CanvasGradesFetcher:
                             max_retries,
                             filename,
                         )
-            time.sleep(1)
 
     def fetch_course_assignments(self, course_id: int) -> List[Dict[str, Any]]:
         """Fetch all assignments for a given course.
@@ -242,7 +313,6 @@ class CanvasGradesFetcher:
             "include[]": [
                 "user",
                 "submission_comments",
-                "submission_history",
                 "full_rubric_assessment",
             ],
             "per_page": 100,
@@ -251,6 +321,48 @@ class CanvasGradesFetcher:
         submissions = self._get_paginated_list(url, params=params)
         logger.info(f"Successfully fetched {len(submissions)} submissions")
         return submissions
+
+    def fetch_all_course_submissions(
+        self,
+        course_id: int,
+        assignment_ids: list[int] | None = None,
+        workflow_state: str | None = None,
+    ) -> list[dict]:
+        """
+        Fetch submissions for all (or specified) assignments in a course using
+        the bulk endpoint. This is much more efficient than fetching per-assignment.
+
+        Args:
+            course_id: Canvas course ID
+            assignment_ids: Optional list of assignment IDs to filter. If None,
+                            returns submissions for ALL assignments. Canvas
+                            accepts multiple assignment_ids[] parameters (batching
+                            handled by caller).
+            workflow_state: Optional filter: 'submitted', 'graded',
+                            'pending_review', 'unsubmitted'
+
+        Returns:
+            Flat list of submission dicts (not grouped by student).
+        """
+        url = f"{self.canvas_domain}/api/v1/courses/{course_id}/students/submissions"
+        params = {
+            "student_ids[]": "all",
+            "include[]": [
+                "user",
+                "submission_comments",
+                "full_rubric_assessment",
+            ],
+            "per_page": 100,
+        }
+
+        if assignment_ids:
+            params["assignment_ids[]"] = assignment_ids
+
+        if workflow_state:
+            params["workflow_state"] = workflow_state
+
+        logger.info(f"Fetching bulk submissions for course {course_id} (assignments=%s)", assignment_ids)
+        return self._get_paginated_list(url, params=params)
 
     def fetch_course_students(self, course_id: int) -> List[Dict[str, Any]]:
         """Fetch all students enrolled in a course.
