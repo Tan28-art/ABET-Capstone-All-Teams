@@ -1085,8 +1085,19 @@ def move_data_between_courses(course_id_to_push: str,
     temp_dir = create_temp_dir()
     try:
         grades_fetcher = CanvasGradesFetcher(access_token=canvas_access_token)
-
+        
         for course_id_to_pull in course_ids_to_pull:
+            
+            assignment_groups_data = grades_fetcher.fetch_assignment_groups(course_id=course_id_to_pull)
+
+            # Dictionary of assignment groups where key is ID, value is category
+            # Ex. {123456: "Assignments", 1234567: "Quizzes"}
+            assignment_groups = {}
+            for group in assignment_groups_data: 
+                assignment_id = group.get('id', 0)                      #Example: id = 123456
+                category = group.get('name', 'X')                       #Example: name = "Quizzes"
+                assignment_groups[assignment_id] = category
+            
             #Fetch course info - Syllabus and Term
             course_info = grades_fetcher.api_request(
                 endpoint_or_url=f"courses/{course_id_to_pull}", params={"include[]": ["syllabus_body", "term"]}
@@ -1132,6 +1143,7 @@ def move_data_between_courses(course_id_to_push: str,
                 assignment_folder_path = os.path.join(
                     temp_dir, f"{assignment['id']}_{sanitized_name}"
                 )
+
                 report_path = generate_assignment_grade_report(
                     grades_fetcher,
                     assignment,
@@ -1143,7 +1155,11 @@ def move_data_between_courses(course_id_to_push: str,
                 
                 if local_files:
                     logger.info("Uploading artifacts for '%s'...", assignment["name"])
-                    canvas_folder = f"{course_folder_name}/Test_Assignments/{sanitized_name}"
+
+                    assignment_type = assignment_groups[assignment.get('assignment_group_id', 0)]
+                    logger.info("Fetched the Assignment Category - '%s'...", assignment_type)
+                    
+                    canvas_folder = f"{course_folder_name}/Test_Assignments/{assignment_type}/{sanitized_name}"
                     grades_fetcher.upload_files(course_id_to_push, canvas_folder, local_files)
                 else:
                     logger.info("No artifacts found to upload for this assignment.")
