@@ -28,6 +28,11 @@ from docx import Document  # python-docx
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+
+
 
 # CONFIG
 load_dotenv()
@@ -47,6 +52,8 @@ prompt_base = (
     "'If outcome was not met, what changes need to be made to ensure that students can meet this outcome in the future?' "
     "Do not add headings, labels, bullets, or extra lines. 1-3 sentences. Concise and actionable."
 )
+
+
 
 # TEMPLATE BASE64: Template by prof encoded in base64
 #TODO: See if it is possible to load this as a enviroment variable instead of hardcoding it here.
@@ -70,6 +77,7 @@ def load_json_files(glob_pattern: str):
             with open(f, "r", encoding="utf-8") as fh:
                 js = json.load(fh)
             data.append((f, js))
+
         except Exception as e:
             print(f"Failed to read {f}: {e}")
     return data
@@ -662,12 +670,16 @@ def update_section1_in_doc(doc: Document, js: Dict[str, Any], feedback_text: Opt
 
     update_score_distribution_table(doc, thr, sample_size, number_comp)
 
-
-# main
-def main():
+"""
+reportgen is where the doc report is being generated based the json file input and is returned as a dictionary for the fast api
+"""
+def reportgen(template_path: str, json_input_glob: str) -> dict:
+    
     ensure_template_docx(template_path)
 
     data = load_json_files(json_input_glob)
+
+    
     summary_records = []
 
     for path, js in data:
@@ -705,6 +717,43 @@ def main():
             writer.writerows(summary_records)
         print(f"\nSummary CSV written: {output_csv}")
 
+    return {"check": ":)", "ABET_report": output_csv}
 
-if __name__ == "__main__":
-    main()
+# main
+#def main():
+# print("hi")
+#fast api
+#uvicorn abetReportGenerator:app --reload
+
+#replacing main with fast api. first time using it so might change later
+app = FastAPI()
+@app.get("/")
+def index() -> dict[str,str]:
+    return {"message": "test"}
+
+
+"""
+do and click localhost:
+uvicorn abetReportGenerator:app --reload
+when executing
+replace: string with 
+  "input_template_name": "_ABET_TEMPLATE.docx",
+  "input_json": "input_jsons/*.json"
+}
+"""
+
+class Item(BaseModel):
+    input_template_name: str
+    input_json: str
+
+@app.post("/items/")
+def create_item(req: Item):
+    template_name = os.path.join(out_dir, req.input_template_name)
+
+    result = reportgen(template_name, req.input_json)
+    return {"result": result}
+
+
+
+#if __name__ == "__main__":
+   # main()
