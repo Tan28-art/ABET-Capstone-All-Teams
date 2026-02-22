@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Iterable, Tuple
 
 from docx import Document  # python-docx
+from docx.oxml import OxmlElement
+from docx.text.paragraph import Paragraph
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -51,6 +53,19 @@ prompt_base = (
     "Output ONLY the text that should follow the question: "
     "'If outcome was not met, what changes need to be made to ensure that students can meet this outcome in the future?' "
     "Do not add headings, labels, bullets, or extra lines. 1-3 sentences. Concise and actionable."
+)
+
+prompt_section2_base = (
+    "You are formatting ABET report section content for faculty. "
+    "Rewrite the provided assessment instrument content into clean, professional plain text with this layout: "
+    "intro paragraph, then Part headings and body paragraphs. "
+    "Preserve the original meaning and details; do not invent facts. "
+    "Remove artifacts like standalone page numbers and broken OCR spacing. "
+    "If source uses numbered questions, leave it as it is. "
+    "Output STRICT JSON only in this schema: "
+    '{"blocks":[{"intro":"<1 short paragraph>","parts":[{"heading":"<numbered questions>: <title>","body":"<paragraph>"}],"closing":"<optional closing paragraph>"}]}. '
+    "Each part body should be one concise paragraph."
+    "No markdown. No code fences."
 )
 
 
@@ -196,6 +211,23 @@ def get_course_code(js: Dict[str, Any]) -> str:
     """
     ci = js.get("course_info") or js.get("course_identification") or {}
     return str(ci.get("course_code") or "N/A").strip()
+
+def get_enrollment_count(js: Dict[str, Any]) -> int:
+    """
+    Returns course enrollment count for student enrollments when available.
+    """
+    ci = js.get("course_info") or js.get("course_identification") or {}
+    enrollments = ci.get("enrollments", [])
+    if isinstance(enrollments, list):
+        for enrollment in enrollments:
+            if isinstance(enrollment, dict) and enrollment.get("type") == "student":
+                amount = enrollment.get("amount")
+                if amount is not None:
+                    try:
+                        return int(amount)
+                    except (ValueError, TypeError):
+                        pass
+    return 0
 
 
 def normalize_course_line_for_template(course_code: str) -> str:
@@ -345,6 +377,247 @@ def build_structured_summary(js: Dict[str, Any]) -> str:
         f"Rubric criteria total: {rubric_count}",
     ]
     return "\n".join(lines)
+
+def get_description_file_contents(js: Dict[str, Any]):
+    """
+    Collect non-empty text values from contributing_assignments[*].description_files_content.
+    """
+    contents = []
+    assigns = js.get("contributing_assignments") or []
+    if not isinstance(assigns, list):
+        return contents
+
+    for a in assigns:
+        if not isinstance(a, dict):
+            continue
+        files_content = a.get("description_files_content")
+        if not isinstance(files_content, dict):
+            continue
+
+        for value in files_content.values():
+            text = str(value or "").strip()
+            if text:
+                contents.append(text)
+
+    return contents
+
+
+def get_section2_sources(js: Dict[str, Any]) -> list[Dict[str, str]]:
+    """
+    Build one Section 2 source block per contributing assignment.
+    """
+    sources: list[Dict[str, str]] = []
+    assigns = js.get("contributing_assignments") or []
+    if not isinstance(assigns, list):
+        return sources
+
+    for idx, a in enumerate(assigns, start=1):
+        if not isinstance(a, dict):
+            continue
+
+        title = str(a.get("name") or f"Assignment {idx}").strip()
+        parts = []
+
+        desc = strip_html(str(a.get("description") or "")).strip()
+        if desc:
+            parts.append(desc)
+
+        files_content = a.get("description_files_content")
+        if isinstance(files_content, dict):
+            for value in files_content.values():
+                text = str(value or "").strip()
+                if text:
+                    parts.append(text)
+
+        if parts:
+            joined = "\n\n".join(parts).strip()
+            if joined:
+                sources.append({"title": title, "text": joined})
+
+    return sources
+
+
+def is_assessment_section_heading(text: str) -> bool:
+    return bool(re.match(r"^Assessment Report Section\s+\d+\s*:", (text or "").strip()))
+
+
+def insert_paragraph_after(paragraph: Paragraph, text: str, bold: bool = False) -> Paragraph:
+    new_p = OxmlElement("w:p")
+    paragraph._p.addnext(new_p)
+    new_para = Paragraph(new_p, paragraph._parent)
+    run = new_para.add_run(text)
+    if bold:
+        run.bold = True
+    return new_para
+
+
+def normalize_section2_source_text(text: str) -> str:
+    """
+    Normalize noisy extraction text before sending to AI.
+    """
+    text = str(text or "")
+    lines = [ln.strip() for ln in text.splitlines()]
+    cleaned_lines = []
+    for ln in lines:
+        if not ln:
+            continue
+        if re.fullmatch(r"\d{1,3}", ln):
+            continue
+        cleaned_lines.append(ln)
+    out = "\n".join(cleaned_lines)
+    out = re.sub(r"[ \t]+", " ", out)
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    return out.strip()
+
+
+def format_section2_with_openai(raw_contents: Iterable[str], js: Dict[str, Any]) -> list[Dict[str, Any]]:
+    """
+    Uses OpenAI to clean and normalize Section 2 content into polished paragraphs.
+    """
+    contents = [normalize_section2_source_text(c) for c in raw_contents if str(c or "").strip()]
+    contents = [c for c in contents if c]
+    if not contents:
+        return []
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        api_key = api_key.strip().strip('"').strip("'")
+    if not api_key:
+        return []
+
+    course_name = get_course_name(js)
+    course_code = get_course_code(js)
+    outcome_title = get_outcome_title(js)
+    joined = "\n\n--- SOURCE BLOCK ---\n\n".join(contents)
+
+    user_text = (
+        f"Course: {course_name} ({course_code})\n"
+        f"Outcome: {outcome_title}\n\n"
+        "Format these source blocks for ABET Section 2.\n"
+        "Keep one output block per source block when possible.\n"
+        "Remove the '--- SOURCE BLOCK ---' dividers in the output.\n\n"
+        f"{joined}"
+    )
+
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.responses.create(
+            model=OPENAI_MODEL,
+            input=[
+                {"role": "system", "content": prompt_section2_base},
+                {"role": "user", "content": user_text},
+            ],
+        )
+        out = (response.output_text or "").strip()
+        payload = json.loads(out)
+        blocks = payload.get("blocks", [])
+        formatted = []
+        for b in blocks:
+            if not isinstance(b, dict):
+                continue
+            intro = str(b.get("intro") or "").strip()
+            parts = b.get("parts")
+            closing = str(b.get("closing") or "").strip()
+            if not isinstance(parts, list):
+                continue
+            normalized_parts = []
+            for p in parts:
+                if not isinstance(p, dict):
+                    continue
+                heading = str(p.get("heading") or "").strip()
+                body = str(p.get("body") or "").strip()
+                if not heading or not body:
+                    continue
+                normalized_parts.append({"heading": heading, "body": body})
+            if not intro and not normalized_parts and not closing:
+                continue
+            formatted.append(
+                {
+                    "intro": intro,
+                    "parts": normalized_parts,
+                    "closing": closing,
+                }
+            )
+        if formatted:
+            return formatted
+    except Exception as e:
+        print(f"OpenAI section 2 formatting failed: {e}")
+
+    return []
+
+
+def update_section2_in_doc(doc: Document, js: Dict[str, Any]) -> None:
+    """
+    Rebuild Section 2 with AI-polished content from description_files_content.
+    """
+    sources = get_section2_sources(js)
+    if not sources:
+        return
+
+    heading_text = "Assessment Report Section 2: Assessment Instrument"
+    heading_idx = None
+    for i, p in enumerate(doc.paragraphs):
+        if (p.text or "").strip().startswith(heading_text):
+            heading_idx = i
+            break
+
+    if heading_idx is None:
+        doc.add_paragraph("")
+        heading = doc.add_paragraph(heading_text)
+        if heading.runs:
+            heading.runs[0].bold = True
+    else:
+        heading = doc.paragraphs[heading_idx]
+        to_remove = []
+        for p in doc.paragraphs[heading_idx + 1:]:
+            if is_assessment_section_heading(p.text):
+                break
+            to_remove.append(p)
+        for p in to_remove:
+            p._element.getparent().remove(p._element)
+
+    anchor = heading
+    show_assignment_titles = len(sources) > 1
+    for src in sources:
+        formatted_blocks = format_section2_with_openai([src["text"]], js)
+
+        if show_assignment_titles:
+            anchor = insert_paragraph_after(anchor, "")
+            anchor = insert_paragraph_after(anchor, src["title"])
+            anchor = insert_paragraph_after(anchor, "")
+
+        if formatted_blocks:
+            block = formatted_blocks[0]
+            intro = str(block.get("intro") or "").strip()
+            parts = block.get("parts") or []
+            closing = str(block.get("closing") or "").strip()
+
+            if intro:
+                anchor = insert_paragraph_after(anchor, intro)
+                anchor = insert_paragraph_after(anchor, "")
+
+            for p in parts:
+                heading_text = str(p.get("heading") or "").strip()
+                body_text = str(p.get("body") or "").strip()
+                if not heading_text or not body_text:
+                    continue
+                anchor = insert_paragraph_after(anchor, heading_text)
+                anchor = insert_paragraph_after(anchor, "")
+                anchor = insert_paragraph_after(anchor, body_text)
+                anchor = insert_paragraph_after(anchor, "")
+
+            if closing:
+                anchor = insert_paragraph_after(anchor, closing)
+                anchor = insert_paragraph_after(anchor, "")
+            continue
+
+        fallback = normalize_section2_source_text(src["text"])
+        if fallback:
+            for ln in fallback.splitlines():
+                clean_ln = ln.strip()
+                if not clean_ln:
+                    continue
+                anchor = insert_paragraph_after(anchor, clean_ln)
 
 
 # OPENAI (FEEDBACK ONLY)
@@ -595,6 +868,8 @@ def update_section1_in_doc(doc: Document, js: Dict[str, Any], feedback_text: Opt
     class_line = normalize_course_line_for_template(get_course_code(js))
     metric_line = f"Metric Instrument Type: {infer_metric_instrument_type(js)}"
     thr = get_threshold(js)
+    enrollment_count = get_enrollment_count(js)
+    enrollment_line = f"Class Enrollment: {enrollment_count} students"
 
     overall = get_overall_summary(js)
     sample_size = overall.get("sample_size", "N/A")
@@ -638,6 +913,10 @@ def update_section1_in_doc(doc: Document, js: Dict[str, Any], feedback_text: Opt
 
         if t.startswith("Metric Instrument Type:"):
             replace_paragraph_text_preserve_style(p, metric_line)
+            continue
+
+        if t.startswith("Class Enrollment:"):
+            replace_paragraph_text_preserve_style(p, enrollment_line)
             continue
 
         if t.startswith("To show competency, a student must score at least"):
@@ -696,6 +975,7 @@ def reportgen(template_path: str, json_input_glob: str) -> dict:
 
         doc = Document(template_path)
         update_section1_in_doc(doc, js, feedback_text)
+        update_section2_in_doc(doc, js)
 
         out_path = os.path.join(out_dir, f"{base}_ABET_Report.docx")
         doc.save(out_path)
