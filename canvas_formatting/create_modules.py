@@ -12,7 +12,7 @@ from create_html import WriteAbetHtml
 CANVAS_DOMAIN = "canvas.asu.edu"
 CANVAS_TOKEN = os.getenv("canvas_access_token")
 SOURCE_COURSE_ID = "240102"
-DESTINATION_COURSE_ID = "226368" #226368
+DESTINATION_COURSE_ID = "240102" #226368
 
 # SETUP
 API_BASE_URL = f"https://{CANVAS_DOMAIN}/api/v1/"
@@ -21,7 +21,7 @@ HEADERS = {"Authorization": f"Bearer {CANVAS_TOKEN}"}
 TEMP_DIR = "temp_html_files"
 
 
-def add_to_canvas(course_code, course_name, semester, year):
+def add_to_canvas(course_name, semester, year):
     try:
         local_path = os.path.join(TEMP_DIR, 'test.html')
         with open(local_path, 'r', encoding='utf-8') as f:
@@ -30,7 +30,7 @@ def add_to_canvas(course_code, course_name, semester, year):
         print(f"Error: {e}")
     page_data = {
         "wiki_page": {
-            "title": f"{course_code}: {course_name} ({semester.capitalize()} {year})",
+            "title": f"{course_name} ({semester.capitalize()} {year})",
             "body": f"{html_content}"
         }
     }
@@ -159,7 +159,7 @@ def add_single_module_item(course_id, module_id, page):
         response.raise_for_status()
         print(f"Status: {response.status_code}")
 
-def find_file_folder(course_id, term, course_code):
+def find_file_folder(course_id, semester, year):
     """
     Finds all course data file folders for a specific semester-year combination.
 
@@ -171,14 +171,14 @@ def find_file_folder(course_id, term, course_code):
     Returns:
         list: A list of folder objects that match the term-course_code combination.
     """
-    print(f"Finding all {term}_{course_code} folders in course {course_id}...")
+    print(f"Finding all ({year} {semester.capitalize()}) folders in course {course_id}...")
     endpoint = f"courses/{course_id}/folders"
     file_folders = get_paginated_list(endpoint, params={"include[]":"folders"})
 
     return[
         f
         for f in file_folders
-        if f"{term}_{course_code}" in f.get("full_name")
+        if f"({year} {semester.capitalize()})" in f.get("full_name")
     ]
 
 def find_unique_courses(file_folders):
@@ -197,7 +197,7 @@ def find_unique_courses(file_folders):
         print(course)
     return unique_courses
 
-def get_files(course_id, course_code, semester, year, file_folders):
+def get_files(course_id, semester, year, file_folders):
     """
     Finds all course data files for a specific semester-year combination.
 
@@ -210,23 +210,25 @@ def get_files(course_id, course_code, semester, year, file_folders):
     Returns:
         list: A list of file objects that match the course, semester-year combination.
     """
-    print(f"\nSearching for {course_code} assignment data in course {course_id}...")
+    course_name = file_folders[0].get("name")[0:7]
+    print(f"\nSearching for {course_name} assignment data in course {course_id}...")
     endpoint = f"courses/{course_id}/files"
 
     folder_to_files = {}
     for f in file_folders: #search for files associated with each folder
         full_folder_name = f.get("full_name")
+        print("Found: ",full_folder_name)
         abbrv_name = f.get("name")
-        if f"{course_code}" in abbrv_name: #sort out main folder name
+        if f"{course_name}" in abbrv_name: #sort out main folder name
             continue
         else:
-            if course_code in full_folder_name:
+            if "Test_Assignments" in full_folder_name:
                 folder_id = f.get("id")
-                print(f"Folder: {full_folder_name} | Id: {folder_id}")
+                print(f"Folder: {abbrv_name} | Id: {folder_id}")
                 files = get_paginated_list(endpoint)
                 found_files = [f for f in files if f.get("folder_id") == folder_id]
                 folder_to_files[abbrv_name] = found_files # map folder_to_file provided folder_name key
-    return folder_to_files
+    return folder_to_files, course_name
 
 # Steps:
 # 1. Setup: Clean and create a temporary directory for HTML file storage.
@@ -242,19 +244,18 @@ def main():
 
     # Passed in from user
     semester = "fall"
-    year = "2025"
+    year = "2023"
 
     html_writer = WriteAbetHtml()
 
    # find course_code to sort folders by
-    course_info = requests.get(url=f"{API_BASE_URL}courses/{SOURCE_COURSE_ID}", headers=HEADERS).json()
-    course_code = course_info.get('course_code')
-    course_name = course_info.get('name')
+  #  course_info = requests.get(url=f"{API_BASE_URL}courses/{SOURCE_COURSE_ID}", headers=HEADERS).json()
+ #   course_code = course_info.get('course_code')
+  #  course_name = course_info.get('name')
 
     # Find all file folders for corresponding fall-semester combination
-    file_folders = find_file_folder(SOURCE_COURSE_ID, "term", course_code)
-    files = get_files(SOURCE_COURSE_ID, course_code, "fall", "2025", file_folders)
-
+    file_folders = find_file_folder(SOURCE_COURSE_ID, semester, year)
+    files, course_name = get_files(SOURCE_COURSE_ID, semester, year, file_folders)
 
     # add placeholder modules (uncomment when wanted):
     """ upload_module_to_canvas(DESTINATION_COURSE_ID, "Assessment Instruments and Student Work Samples")
@@ -265,19 +266,19 @@ def main():
     # add course folder module
     module_name = f"Courses - Course Folders and Student Work Samples ({semester.capitalize()} {year})"
     module = upload_module_to_canvas(DESTINATION_COURSE_ID, module_name)
-
+    
     # Add course page(s) to canvas - under course folder module
-    html_writer.set_up_course_page(file_folders, files, course_code, course_name, semester, year)
-    page = add_to_canvas(course_code, course_name, semester, year)
+    html_writer.set_up_course_page(file_folders, files, semester, year)
+    page = add_to_canvas(course_name, semester, year)
     add_single_module_item(DESTINATION_COURSE_ID, module.get("id"), page)
-
+    """
     # set up abet page (uncomment when wanted):
     module_name = f"Assessment Instruments and Student Work Samples"
     module = upload_module_to_canvas(DESTINATION_COURSE_ID, module_name)
     html_writer.set_up_abet_page()
     abet_page = add_abet_to_canvas()
     add_single_module_item(DESTINATION_COURSE_ID, module.get("id"), abet_page)
-
+    """
     shutil.rmtree(TEMP_DIR)
     print("\nProcess finished.")
 

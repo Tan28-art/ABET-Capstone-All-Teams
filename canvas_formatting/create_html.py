@@ -180,6 +180,19 @@ class WriteAbetHtml:
         self.write_to_page(row) #repeat for however many rows there are
         self.write_to_page("</table>") #close table
 
+    def get_assignment_groups(self, file_folders, files):
+        assignment_groups = [] # 
+        for folder in file_folders:
+            f_name = folder.get("full_name")
+            if f"Test_Assignments/" in f_name:
+                split_name = f_name.split('Test_Assignments/', 1)[1]
+                group_name = split_name.split('/', 1)[0]
+                print("GROUP", split_name)
+                if group_name not in assignment_groups:
+                    assignment_groups.append(group_name)
+        return assignment_groups
+
+    """
     def get_lab_projects(self, file_folders, files):
         lab_projects = []
         for folder in file_folders:
@@ -205,49 +218,66 @@ class WriteAbetHtml:
                         if f"description" in file.get("filename").lower():
                             exams.append(file)
         return exams
-
-    def set_up_course_page(self, file_folders, files, course_code, course_name, semester, year):
+    """
+    def get_assignments(self, group_name, file_folders, files):
+        assignments = []
+        for folder in file_folders:
+            if f"{group_name}" in folder.get("full_name"):
+               # print("FOLDERNAME", folder.get("name"))
+                try:
+                    folders_files = files[folder.get("name")]
+                    for file in folders_files:
+                        if(file.get("folder_id") == folder.get("id")):
+                            print(f"{file.get("filename")} | {file.get("id")}")
+                            if f"description" in file.get("filename").lower():
+                                assignments.append(file)
+                except KeyError:
+                    pass
         
+        return assignments
+
+    def set_up_course_page(self, file_folders, files, semester, year):
         # Find the course's syllabus
-        for file in files["Syllabus"]:
-            if file.get("filename") == 'syllabus_body.pdf':
-                syllabus_id = file.get("id")
-                print(syllabus_id)
-        syllabus_link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{syllabus_id}"
+        try:
+            for file in files["Syllabus"]:
+                if file.get("filename") == 'syllabus_body.pdf':
+                    syllabus_id = file.get("id")
+                    print(syllabus_id)
+            syllabus_link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{syllabus_id}"
+        except KeyError:
+            print("Missing syllabus for this course")
+            syllabus_link = "Invalid"
+        
     # <h1 class="page-title">{course_code}: {course_name} ({semester.capitalize()} {year})</h1>
         content = f"""
+    <h3>Syllabus and Course Schedule</h3>"""
+        if(syllabus_link != "Invalid"):
+            content += f""" <ul>
+        <li><a href={syllabus_link}>Syllabus.pdf</a></li><br>
+            </ul>
+            """
+        else:
+            content += f"""<ul>Syllabus is missing.</ul>"""
+            
+        content += f"""
+    <h3>Lab Projects, Quizzes, and Exams</h3>"""
+        self.write_to_page(content)
 
-    <h3>Syllabus and Course Schedule</h3>
-    <ul>
-        <li><a href={syllabus_link}>{course_code}_syllabus_and_schedule.pdf</a></li><br>
-    </ul>
-    <h3>Lab Projects, Quizzes, and Exams</h3>
-    <ul>
-    <li>Lab Projects<br>
-        <ul>"""
-        self.write_to_page(content)
+        assignment_groups = self.get_assignment_groups(file_folders, files)
+        print(assignment_groups)
         # add lab projects:
-        lab_projects = self.get_lab_projects(file_folders, files)
-        for file in lab_projects:
-            link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{file.get("id")}"
-            self.write_to_page(f"<li><a href={link}>{unquote(file.get("filename"))}</a></li>")
-        content = """
-        </ul>
-    </li>
-    <li>Exams<br>
-        <ul>"""
-        self.write_to_page(content)
-        # add quizzes/exams
-        exams = self.get_exams(file_folders, files)
-        for file in exams:
-            link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{file.get("id")}"
-            self.write_to_page(f"<li><a href={link}>{file.get("filename")}</a></li>")
-        content = """
-        </ul>
-    </li>
-    """
-        self.write_to_page(content)
-        self.add_graded_work_course_page(file_folders, files, lab_projects, exams)
+        for group in assignment_groups:
+            print("GROUP: ", group)
+            assignments = self.get_assignments(group, file_folders, files)
+            self.write_to_page(f"<ul><li>{group}<br><ul>")
+            for file in assignments:
+               folder_id = file.get("folder_id")
+               
+               link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{file.get("id")}"
+               self.write_to_page(f"<li><a href={link}>{unquote(file.get("filename"))}</a></li>")
+            self.write_to_page(f"</ul></li></ul>")
+
+  #      self.add_graded_work_course_page(file_folders, files, lab_projects, exams)
 
 #def main():
 
