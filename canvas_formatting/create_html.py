@@ -1,5 +1,4 @@
-
-# Creates html pages to uplaod for courses & ABET reports
+# Creates html pages to upload for courses & ABET reports
 
 import requests
 import json
@@ -9,6 +8,7 @@ import shutil
 import sys
 from urllib.parse import urljoin
 from urllib.parse import unquote
+
 
 class WriteAbetHtml:
 
@@ -34,11 +34,10 @@ class WriteAbetHtml:
         except IOError as e:
             print(f"Error writing to the html file: {e}")
 
-
     def add_abet_table_row(self, i, abet_outcome):
         student_outcome_cell = f"""
         <tr>
-            <td>CSE({i+1})<br>{abet_outcome}</td>
+            <td>CSE({i + 1})<br>{abet_outcome}</td>
             <td>
                         <p>CSE Placeholder Assessment Report and Instrument:</p>
                         <ul>
@@ -132,9 +131,9 @@ class WriteAbetHtml:
                 </tr>
             </tbody>
         """
-            self.write_to_page(row) #repeat for however many rows there are
-        
-        self.write_to_page("</table>") #close table
+            self.write_to_page(row)  # repeat for however many rows there are
+
+        self.write_to_page("</table>")  # close table
         for exam in exams:
             exam_high = ""
             exam_low = ""
@@ -177,11 +176,11 @@ class WriteAbetHtml:
             </tr>
         </tbody>
     """
-        self.write_to_page(row) #repeat for however many rows there are
-        self.write_to_page("</table>") #close table
+        self.write_to_page(row)  # repeat for however many rows there are
+        self.write_to_page("</table>")  # close table
 
     def get_assignment_groups(self, file_folders, files):
-        assignment_groups = [] # 
+        assignment_groups = []  #
         for folder in file_folders:
             f_name = folder.get("full_name")
             if f"Test_Assignments/" in f_name:
@@ -219,68 +218,178 @@ class WriteAbetHtml:
                             exams.append(file)
         return exams
     """
+
     def get_assignments(self, group_name, file_folders, files):
+        # Flatten ALL files from the dict into one list
+        all_files = []
+        try:
+            for v in files.values():
+                if isinstance(v, list):
+                    all_files.extend(v)
+        except Exception:
+            pass
+
         assignments = []
+
         for folder in file_folders:
-            if f"{group_name}" in folder.get("full_name"):
-               # print("FOLDERNAME", folder.get("name"))
-                try:
-                    folders_files = files[folder.get("name")]
-                    for file in folders_files:
-                        if(file.get("folder_id") == folder.get("id")):
-                            print(f"{file.get("filename")} | {file.get("id")}")
-                            if f"description" in file.get("filename").lower():
-                                assignments.append(file)
-                except KeyError:
-                    pass
-        
+            full_name = folder.get("full_name", "")
+
+            # Only folders under Test_Assignments/<group_name>/...
+            if f"Test_Assignments/{group_name}" in full_name:
+                folder_id = folder.get("id")
+
+                # Collect every file whose folder_id matches this folder
+                for f in all_files:
+                    if f.get("folder_id") == folder_id:
+                        filename = (f.get("filename") or "").lower()
+
+                        # skip description.html
+                        if "description" in filename and filename.endswith(".html"):
+                            continue
+
+                        assignments.append(f)
+
+        print(f"GROUP '{group_name}' → found {len(assignments)} files")
         return assignments
 
+    def _is_hml_file(self, filename_lower: str) -> bool:
+        return (
+                "high" in filename_lower
+                or "mid" in filename_lower
+                or "avg" in filename_lower
+                or "low" in filename_lower
+        )
+
+    def _hml_label(self, filename_lower: str) -> str:
+        if "high" in filename_lower:
+            return "High"
+        if "avg" in filename_lower or "mid" in filename_lower:
+            return "Mid"
+        if "low" in filename_lower:
+            return "Low"
+        return ""
+
     def set_up_course_page(self, file_folders, files, semester, year):
-        # Find the course's syllabus
+        # ----------------------------
+        # 1) Syllabus
+        # ----------------------------
+        syllabus_link = "Invalid"
         try:
-            for file in files["Syllabus"]:
-                if file.get("filename") == 'syllabus_body.pdf':
-                    syllabus_id = file.get("id")
-                    print(syllabus_id)
-            syllabus_link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{syllabus_id}"
-        except KeyError:
-            print("Missing syllabus for this course")
+            syllabus_id = None
+            for f in files.get("Syllabus", []):
+                if (f.get("filename") or "").lower() in ["syllabus_body.pdf", "syllabus.pdf"]:
+                    syllabus_id = f.get("id")
+                    break
+
+            if syllabus_id is not None:
+                syllabus_link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{syllabus_id}"
+        except Exception:
             syllabus_link = "Invalid"
-        
-    # <h1 class="page-title">{course_code}: {course_name} ({semester.capitalize()} {year})</h1>
-        content = f"""
-    <h3>Syllabus and Course Schedule</h3>"""
-        if(syllabus_link != "Invalid"):
-            content += f""" <ul>
-        <li><a href={syllabus_link}>Syllabus.pdf</a></li><br>
-            </ul>
-            """
+
+        content = "<h3>Syllabus and Course Schedule</h3>\n"
+        if syllabus_link != "Invalid":
+            content += f"""
+<ul>
+  <li><a href="{syllabus_link}">Syllabus.pdf</a></li>
+</ul>
+"""
         else:
-            content += f"""<ul>Syllabus is missing.</ul>"""
-            
-        content += f"""
-    <h3>Lab Projects, Quizzes, and Exams</h3>"""
+            content += "<ul><li>Syllabus is missing.</li></ul>\n"
+
+        # ----------------------------
+        # 2) Main Section Header
+        # ----------------------------
+        content += "<h3>Homework Assignments, Projects, Quizzes, and Exams</h3>\n"
         self.write_to_page(content)
 
+        # ----------------------------
+        # 3) Build groups from folders
+        # ----------------------------
         assignment_groups = self.get_assignment_groups(file_folders, files)
-        print(assignment_groups)
-        # add lab projects:
+
+        # ----------------------------
+        # 4) Render each group
+        # ----------------------------
         for group in assignment_groups:
-            print("GROUP: ", group)
-            assignments = self.get_assignments(group, file_folders, files)
-            self.write_to_page(f"<ul><li>{group}<br><ul>")
-            for file in assignments:
-               folder_id = file.get("folder_id")
-               
-               link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{file.get("id")}"
-               self.write_to_page(f"<li><a href={link}>{unquote(file.get("filename"))}</a></li>")
-            self.write_to_page(f"</ul></li></ul>")
+            group_files = self.get_assignments(group, file_folders, files)
 
-  #      self.add_graded_work_course_page(file_folders, files, lab_projects, exams)
+            if not group_files:
+                self.write_to_page(f"<ul><li><b>{group}</b> (no files found)</li></ul>")
+                continue
 
-#def main():
+            has_hml = any(self._is_hml_file((f.get("filename") or "").lower()) for f in group_files)
 
+            # A) TABLE format
+            if has_hml:
+                rows = {}
 
-#if __name__ == "__main__":
-#    main()
+                for f in group_files:
+                    fname = f.get("filename") or ""
+                    fl = fname.lower()
+
+                    if "description" in fl and fl.endswith(".html"):
+                        continue
+
+                    label = self._hml_label(fl)
+                    if not label:
+                        continue
+
+                    base = fl
+                    base = base.replace("_high", "").replace("-high", "").replace(" high", "")
+                    base = base.replace("_avg", "").replace("-avg", "").replace(" avg", "")
+                    base = base.replace("_mid", "").replace("-mid", "").replace(" mid", "")
+                    base = base.replace("_low", "").replace("-low", "").replace(" low", "")
+                    base = base.replace(".pdf", "").replace(".txt", "").replace(".docx", "").replace(".doc", "")
+
+                    if base not in rows:
+                        rows[base] = {"High": "", "Mid": "", "Low": ""}
+
+                    link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{f.get('id')}"
+                    rows[base][label] = f'<a href="{link}">{unquote(fname)}</a>'
+
+                self.write_to_page(f"<h4>{group}</h4>")
+                self.write_to_page("""
+<table style="width: 100%;" border="1">
+  <thead>
+    <tr>
+      <th>Assessment</th>
+      <th>High</th>
+      <th>Mid</th>
+      <th>Low</th>
+    </tr>
+  </thead>
+  <tbody>
+""")
+
+                for base_key in sorted(rows.keys()):
+                    pretty_name = base_key.upper()
+                    high = rows[base_key]["High"]
+                    mid = rows[base_key]["Mid"]
+                    low = rows[base_key]["Low"]
+
+                    self.write_to_page(f"""
+<tr>
+  <td>{pretty_name}</td>
+  <td>{high}</td>
+  <td>{mid}</td>
+  <td>{low}</td>
+</tr>
+""")
+
+                self.write_to_page("</tbody></table>")
+
+            # B) BULLET format
+            else:
+                self.write_to_page(f"<ul><li><b>{group}</b><br><ul>")
+
+                for f in group_files:
+                    fname = f.get("filename") or ""
+                    fl = fname.lower()
+
+                    if "description" in fl and fl.endswith(".html"):
+                        continue
+
+                    link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{f.get('id')}"
+                    self.write_to_page(f'<li><a href="{link}">{unquote(fname)}</a></li>')
+
+                self.write_to_page("</ul></li></ul>")
