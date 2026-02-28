@@ -87,98 +87,6 @@ class WriteAbetHtml:
 
         self.write_to_page_abet("</tbody></table>")
 
-    def add_graded_work_course_page(self, file_folders, files, lab_projects, exams):
-        table_set_up = """<h3>Graded Student Work</h3>
-            <p>Lab Projects</p>
-            <table style="width: 100%;" border="1">
-                <thead>
-                    <tr>
-                        <th>Assessment</th>
-                        <th>High</th>
-                        <th>Mid</th>
-                        <th>Low</th>
-                    </tr>
-                </thead>
-            """
-
-        self.write_to_page(table_set_up)
-        for lab in lab_projects:
-            lab_high = ""
-            lab_low = ""
-            lab_mid = ""
-            lab_link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{lab.get("id")}"
-
-            for folder in file_folders:
-                if lab.get("folder_id") == folder.get("id"):
-                    folders_files = files[folder.get("name")]
-                    for file in folders_files:
-                        filename = file.get("filename").lower()
-                        link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{file.get("id")}"
-                        if "high.pdf" in filename or "high.txt" in filename:
-                            lab_high = f"<a href={link}>{filename}</a>"
-                        if "low.pdf" in filename or "low.txt" in filename:
-                            lab_low = f"<a href={link}>{filename}</a>"
-                        if "avg.pdf" in filename or "avg.txt" in filename:
-                            lab_mid = f"<a href={link}>{filename}</a>"
-            # set row information:
-            row = f"""
-            <tbody>
-                <tr>
-                    <td><a href={lab_link}>{unquote(lab.get("filename"))}</a></td>
-                    <td>{lab_high}</td>
-                    <td>{lab_mid}</td>
-                    <td>{lab_low}</td>
-                </tr>
-            </tbody>
-        """
-            self.write_to_page(row)  # repeat for however many rows there are
-
-        self.write_to_page("</table>")  # close table
-        for exam in exams:
-            exam_high = ""
-            exam_low = ""
-            exam_mid = ""
-            exam_link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{exam.get("id")}"
-
-            for folder in file_folders:
-                if exam.get("folder_id") == folder.get("id"):
-                    folders_files = files[folder.get("name")]
-                    for file in folders_files:
-                        filename = file.get("filename").lower()
-                        link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{file.get("id")}"
-                        if "high.pdf" in filename or "high.txt" in filename:
-                            exam_high = f"<a href={link}>{filename}</a>"
-                        if "low.pdf" in filename or "low.txt" in filename:
-                            exam_low = f"<a href={link}>{filename}</a>"
-                        if "avg.pdf" in filename or "avg.txt" in filename:
-                            exam_mid = f"<a href={link}>{filename}</a>"
-
-        exam_set_up = """
-    <p>Exams</p>
-    <table style="width: 100%;" border="1">
-        <thead>
-            <tr>
-                <th>Assessment</th>
-                <th>High</th>
-                <th>Mid</th>
-                <th>Low</th>
-            </tr>
-        </thead>
-    """
-        self.write_to_page(exam_set_up)
-        row = f"""
-    <tbody>
-            <tr>
-                <td><a href={exam_link}>{unquote(exam.get("filename"))}</a></td>
-                <td>{exam_high}</td>
-                <td>{exam_mid}</td>
-                <td>{exam_low}</td>
-            </tr>
-        </tbody>
-    """
-        self.write_to_page(row)  # repeat for however many rows there are
-        self.write_to_page("</table>")  # close table
-
     def get_assignment_groups(self, file_folders, files):
         assignment_groups = []  #
         assignment_names = {}
@@ -188,46 +96,18 @@ class WriteAbetHtml:
                 split_name = f_name.split('Test_Assignments/', 1)[1]
                 # add groups
                 group_name = split_name.split('/', 1)[0]
-                print("GROUP", split_name)
+               # print("GROUP", split_name)
                 if group_name not in assignment_groups:
                     assignment_groups.append(group_name)
                 # add assignments
                 try:
                     assign_name = split_name.split('/', 1)[1]
                     assignment_names[folder.get("id")] = assign_name
-                    print("ASSIGNMENTS", assign_name)
+                   # print("ASSIGNMENTS", assign_name)
                 except(IndexError):
                     continue
 
         return assignment_groups, assignment_names
-
-    """
-    def get_lab_projects(self, file_folders, files):
-        lab_projects = []
-        for folder in file_folders:
-            if f"assignments" in folder.get("full_name").lower():
-                if f"assignment" in folder.get("name").lower():
-                    folders_files = files[folder.get("name")]
-                    for file in folders_files:
-                        #print(f"{file.get("filename")} | {file.get("id")}")
-                        filename = file.get("filename").lower()
-                        if f"assignment" in filename:
-                            if "avg" not in filename and "high" not in filename and "low" not in filename:
-                                lab_projects.append(file)
-        return lab_projects
-
-    def get_exams(self, file_folders, files):
-        exams = []
-        for folder in file_folders:
-            if f"assignments" in folder.get("full_name").lower():
-                if f"quiz" in folder.get("name").lower() or f"exam" in folder.get("name") or f"test" in folder.get("name"):
-                    folders_files = files[folder.get("name")]
-                    for file in folders_files:
-                        print(f"{file.get("filename")} | {file.get("id")}")
-                        if f"description" in file.get("filename").lower():
-                            exams.append(file)
-        return exams
-    """
 
     def get_assignments(self, group_name, file_folders, files):
         # Flatten ALL files from the dict into one list
@@ -337,7 +217,13 @@ class WriteAbetHtml:
             self.write_to_page("</ul></li></ul>")
 
         # ----------------------------
-        # 5) Render each group in table format
+        # 5) Graded Work Section Header
+        # ----------------------------
+        content = "<h3>Graded Student Work</h3>\n"
+        self.write_to_page(content)
+
+        # ----------------------------
+        # 6) Render each group in table format
         # ----------------------------
         for group in assignment_groups:
             group_files = self.get_assignments(group, file_folders, files)
@@ -355,6 +241,7 @@ class WriteAbetHtml:
                 for f in group_files:
                     fname = f.get("filename") or ""
                     fl = fname.lower()
+                    folder_id = f.get("folder_id")
 
                     if "description" in fl and fl.endswith(".html"):
                         continue
@@ -363,18 +250,12 @@ class WriteAbetHtml:
                     if not label:
                         continue
 
-                    base = fl
-                    base = base.replace("_high", "").replace("-high", "").replace(" high", "")
-                    base = base.replace("_avg", "").replace("-avg", "").replace(" avg", "")
-                    base = base.replace("_mid", "").replace("-mid", "").replace(" mid", "")
-                    base = base.replace("_low", "").replace("-low", "").replace(" low", "")
-                    base = base.replace(".pdf", "").replace(".txt", "").replace(".docx", "").replace(".doc", "")
-
-                    if base not in rows:
-                        rows[base] = {"High": "", "Mid": "", "Low": ""}
+                    folder_name = assignment_names[folder_id]
+                    if folder_name not in rows:
+                         rows[folder_name] = {"High": "", "Mid": "", "Low": ""}
 
                     link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{f.get('id')}"
-                    rows[base][label] = f'<a href="{link}">{unquote(fname)}</a>'
+                    rows[folder_name][label] = f'<a href="{link}">{unquote(fname)}</a>'
 
                 self.write_to_page(f"<h4>{group}</h4>")
                 self.write_to_page("""
@@ -391,7 +272,7 @@ class WriteAbetHtml:
 """)
 
                 for base_key in sorted(rows.keys()):
-                    pretty_name = base_key.upper()
+                    pretty_name = base_key
                     high = rows[base_key]["High"]
                     mid = rows[base_key]["Mid"]
                     low = rows[base_key]["Low"]

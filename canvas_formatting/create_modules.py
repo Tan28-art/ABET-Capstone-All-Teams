@@ -74,7 +74,7 @@ def add_to_canvas(course_name, semester, year):
 
     page_data = {
         "wiki_page": {
-            "title": f"{course_name} ({semester.capitalize()} {year})",
+            "title": f"{course_name}",
             "body": f"{html_content}",
         }
     }
@@ -150,13 +150,27 @@ def get_paginated_list(endpoint, params=None):
 
 
 def upload_module_to_canvas(course_id, module_name):
+    # Check if the module already exists
+    all_mods = []
+    endpoint = f"courses/{course_id}/modules"
+    url = urljoin(API_BASE_URL, endpoint)
+    file_folders = get_paginated_list(endpoint, params={"include[]": "modules"})
+    response = requests.get(url, headers=HEADERS)
+    response.raise_for_status()
+    all_mods.extend(response.json())
+
+    for module in all_mods:
+        if module.get("name") == module_name:
+            print(f"Module {module_name} already exists with id {module.get("id")}")
+            return module
+    
+    # If the module does not exist, add it to the canvas page:
     print(f"Uploading '{module_name}' module to Canvas...")
     module_data = {"module": {"name": module_name, "position": 1}}
     response = requests.post(f"{API_BASE_URL}courses/{course_id}/modules", headers=HEADERS, json=module_data)
     response.raise_for_status()
     print(f"Status: {response.status_code}")
     return response.json()
-
 
 def add_single_module_item(course_id, module_id, page):
     module_item_data = {
@@ -187,9 +201,9 @@ def get_files(course_id: str, semester: str, year: str, file_folders: list[dict]
     if not file_folders:
         raise RuntimeError("No folders were returned from Canvas. Check permissions/course_id.")
 
-    first_name = file_folders[0].get("name", "") or ""
-    m = re.search(r"\b([A-Z]{3,4})\s*(\d{3})\b", first_name)
-    course_name = f"{m.group(1)} {m.group(2)}" if m else first_name[:20].strip() or "COURSE"
+    course_name = file_folders[0].get("full_name", "").split('/')[1] or "COURSE"
+  #  m = re.search(r"\b([A-Z]{3,4})\s*(\d{3})\b", first_name)
+  #  course_name = f"{m.group(1)} {m.group(2)}" if m else first_name[:20].strip() or "COURSE"
 
     print("Fetching file list once (paginated)...")
     all_files = get_paginated_list(f"courses/{course_id}/files")
@@ -256,7 +270,6 @@ def main():
 
     shutil.rmtree(TEMP_DIR)
     print("\nProcess finished.")
-
 
 if __name__ == "__main__":
     main()
