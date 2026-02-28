@@ -148,6 +148,12 @@ def get_paginated_list(endpoint, params=None):
 
     return all_items
 
+def publish_module(course_id, module_id):
+    module_data = {"module": {"published": "true"}}
+    response = requests.put(f"{API_BASE_URL}courses/{course_id}/modules/{module_id}", headers=HEADERS, json=module_data)
+    response.raise_for_status()
+    print(f"Module Published Status: {response.status_code}")
+    return response.json()
 
 def upload_module_to_canvas(course_id, module_name):
     # Check if the module already exists
@@ -202,8 +208,6 @@ def get_files(course_id: str, semester: str, year: str, file_folders: list[dict]
         raise RuntimeError("No folders were returned from Canvas. Check permissions/course_id.")
 
     course_name = file_folders[0].get("full_name", "").split('/')[1] or "COURSE"
-  #  m = re.search(r"\b([A-Z]{3,4})\s*(\d{3})\b", first_name)
-  #  course_name = f"{m.group(1)} {m.group(2)}" if m else first_name[:20].strip() or "COURSE"
 
     print("Fetching file list once (paginated)...")
     all_files = get_paginated_list(f"courses/{course_id}/files")
@@ -267,6 +271,9 @@ def main():
     html_writer.set_up_course_page(file_folders, files, semester, year)
     page = add_to_canvas(course_name, semester, year)
     add_single_module_item(DESTINATION_COURSE_ID, module.get("id"), page)
+
+    # 7) Publish the module and its contents
+    publish_module(DESTINATION_COURSE_ID, module.get("id"))
 
     shutil.rmtree(TEMP_DIR)
     print("\nProcess finished.")
