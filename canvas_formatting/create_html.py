@@ -181,15 +181,25 @@ class WriteAbetHtml:
 
     def get_assignment_groups(self, file_folders, files):
         assignment_groups = []  #
+        assignment_names = {}
         for folder in file_folders:
             f_name = folder.get("full_name")
             if f"Test_Assignments/" in f_name:
                 split_name = f_name.split('Test_Assignments/', 1)[1]
+                # add groups
                 group_name = split_name.split('/', 1)[0]
                 print("GROUP", split_name)
                 if group_name not in assignment_groups:
                     assignment_groups.append(group_name)
-        return assignment_groups
+                # add assignments
+                try:
+                    assign_name = split_name.split('/', 1)[1]
+                    assignment_names[folder.get("id")] = assign_name
+                    print("ASSIGNMENTS", assign_name)
+                except(IndexError):
+                    continue
+
+        return assignment_groups, assignment_names
 
     """
     def get_lab_projects(self, file_folders, files):
@@ -243,14 +253,11 @@ class WriteAbetHtml:
                     if f.get("folder_id") == folder_id:
                         filename = (f.get("filename") or "").lower()
 
-                        # skip description.html
-                        if "description" in filename and filename.endswith(".html"):
-                            continue
-
                         assignments.append(f)
 
         print(f"GROUP '{group_name}' → found {len(assignments)} files")
         return assignments
+
 
     def _is_hml_file(self, filename_lower: str) -> bool:
         return (
@@ -270,6 +277,7 @@ class WriteAbetHtml:
         return ""
 
     def set_up_course_page(self, file_folders, files, semester, year):
+
         # ----------------------------
         # 1) Syllabus
         # ----------------------------
@@ -295,7 +303,7 @@ class WriteAbetHtml:
 """
         else:
             content += "<ul><li>Syllabus is missing.</li></ul>\n"
-
+        
         # ----------------------------
         # 2) Main Section Header
         # ----------------------------
@@ -303,12 +311,33 @@ class WriteAbetHtml:
         self.write_to_page(content)
 
         # ----------------------------
-        # 3) Build groups from folders
+        # 3) Build groups and assignment names dict from folders
         # ----------------------------
-        assignment_groups = self.get_assignment_groups(file_folders, files)
+        assignment_groups, assignment_names = self.get_assignment_groups(file_folders, files)
 
         # ----------------------------
-        # 4) Render each group
+        # 4) Bulleted section format
+        # ----------------------------
+        for group in assignment_groups:
+            group_files = self.get_assignments(group, file_folders, files)
+
+            self.write_to_page(f"<ul><li><b>{group}</b><br><ul>")
+
+            for f in group_files:
+                fname = f.get("filename") or ""
+                fl = fname.lower()
+
+                # Add each assignment description (currently located in description.html files) and update name to match parent folder
+                if "description" in fl and fl.endswith(".html"):
+                    folder_id = f.get('folder_id')
+                    assignment_name = assignment_names[folder_id]
+                    link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{f.get('id')}"
+                    self.write_to_page(f'<li><a href="{link}">{assignment_name}</a></li>')
+
+            self.write_to_page("</ul></li></ul>")
+
+        # ----------------------------
+        # 5) Render each group in table format
         # ----------------------------
         for group in assignment_groups:
             group_files = self.get_assignments(group, file_folders, files)
@@ -319,7 +348,7 @@ class WriteAbetHtml:
 
             has_hml = any(self._is_hml_file((f.get("filename") or "").lower()) for f in group_files)
 
-            # A) TABLE format
+            # TABLE format
             if has_hml:
                 rows = {}
 
@@ -377,19 +406,3 @@ class WriteAbetHtml:
 """)
 
                 self.write_to_page("</tbody></table>")
-
-            # B) BULLET format
-            else:
-                self.write_to_page(f"<ul><li><b>{group}</b><br><ul>")
-
-                for f in group_files:
-                    fname = f.get("filename") or ""
-                    fl = fname.lower()
-
-                    if "description" in fl and fl.endswith(".html"):
-                        continue
-
-                    link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{f.get('id')}"
-                    self.write_to_page(f'<li><a href="{link}">{unquote(fname)}</a></li>')
-
-                self.write_to_page("</ul></li></ul>")
