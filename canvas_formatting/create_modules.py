@@ -8,8 +8,8 @@ from urllib.parse import urljoin
 from urllib.parse import unquote
 from collections import defaultdict
 
-from dotenv import load_dotenv
-load_dotenv()
+# from dotenv import load_dotenv
+# load_dotenv()
 
 from create_html import WriteAbetHtml
 
@@ -179,6 +179,16 @@ def upload_module_to_canvas(course_id, module_name):
     return response.json()
 
 def add_single_module_item(course_id, module_id, page):
+    # Check if the module item already exists
+    endpoint = f"courses/{course_id}/modules/{module_id}/items"
+    module_items = get_paginated_list(endpoint)
+
+    for item in module_items:
+        if item.get("title") == page.get("title"):
+            print(f"Module {item.get("title")} already exists with id {item.get("id")}")
+            return
+
+    # If module does not already exist, add to the module
     module_item_data = {
         "module_item": {
             "title": page.get("title"),
@@ -195,12 +205,13 @@ def add_single_module_item(course_id, module_id, page):
     print(f"Status: {response.status_code}")
 
 
-def find_file_folder(course_id, semester, year):
-    print(f"Finding all ({year} {semester.capitalize()}) folders in course {course_id}...")
+def find_file_folder(course_id, semester, year, course_code, instructor_name):
+    print(f"Finding all ({year} {semester.capitalize()}) folders for {course_code} in course {course_id}...")
     endpoint = f"courses/{course_id}/folders"
     file_folders = get_paginated_list(endpoint, params={"include[]": "folders"})
 
-    return [f for f in file_folders if f"({year} {semester.capitalize()})" in f.get("full_name", "")]
+    # sort by semester, year, course_code, (add instructor_name functionality when folder name is changed from extraction_api)
+    return [f for f in file_folders if f"({year} {semester.capitalize()})" in f.get("full_name", "") and course_code in f.get("full_name", "")]
 
 
 def get_files(course_id: str, semester: str, year: str, file_folders: list[dict]) -> tuple[dict, str]:
@@ -242,10 +253,17 @@ def main():
     semester = "fall"
     year = "2023"
 
+    #### ADD to api
+    # (needs to be connected + course_code designated from running the extraction script)
+    # (needs to be labeled + connected from extraction scripts)
+    # For now, add as fields in UI like the year + semester
+    course_code = "CSE 423"
+    instructor_name = "instructor_placeholder"
+
     html_writer = WriteAbetHtml()
 
-    # 1) Find folder structure for the term
-    file_folders = find_file_folder(SOURCE_COURSE_ID, semester, year)
+    # 1) Find folder structure for the term (Also sort by course_code + add instructor_name functionality)
+    file_folders = find_file_folder(SOURCE_COURSE_ID, semester, year, course_code, instructor_name)
 
     # 2) Get your grouped files (syllabus/assignments) from your faster method
     files_by_group, course_name = get_files(SOURCE_COURSE_ID, semester, year, file_folders)
