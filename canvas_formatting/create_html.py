@@ -9,7 +9,6 @@ import sys
 from urllib.parse import urljoin
 from urllib.parse import unquote
 
-
 class WriteAbetHtml:
 
     def __init__(self):
@@ -96,14 +95,14 @@ class WriteAbetHtml:
                 split_name = f_name.split('Test_Assignments/', 1)[1]
                 # add groups
                 group_name = split_name.split('/', 1)[0]
-               # print("GROUP", split_name)
+                # print("GROUP", split_name)
                 if group_name not in assignment_groups:
                     assignment_groups.append(group_name)
                 # add assignments
                 try:
                     assign_name = split_name.split('/', 1)[1]
                     assignment_names[folder.get("id")] = assign_name
-                   # print("ASSIGNMENTS", assign_name)
+                # print("ASSIGNMENTS", assign_name)
                 except(IndexError):
                     continue
 
@@ -138,7 +137,6 @@ class WriteAbetHtml:
         print(f"GROUP '{group_name}' → found {len(assignments)} files")
         return assignments
 
-
     def _is_hml_file(self, filename_lower: str) -> bool:
         return (
                 "high" in filename_lower
@@ -155,9 +153,21 @@ class WriteAbetHtml:
         if "low" in filename_lower:
             return "Low"
         return ""
+    def _is_solution_file(self, filename_lower: str) -> bool:
+        return (
+            "solution" in filename_lower
+            or "_sol" in filename_lower
+            or " sol " in filename_lower
+        )
 
-    def set_up_course_page(self, file_folders, files, semester, year):
+    def _is_marking_guide_file(self, filename_lower: str) -> bool:
+        return (
+            "marking" in filename_lower
+            or "rubric" in filename_lower
+            or "guide" in filename_lower
+        )
 
+    def set_up_course_page(self, file_folders, files, semester, year, instructor_name="Unknown"):
         # ----------------------------
         # 1) Syllabus
         # ----------------------------
@@ -173,21 +183,43 @@ class WriteAbetHtml:
                 syllabus_link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{syllabus_id}"
         except Exception:
             syllabus_link = "Invalid"
+        instructor = ""
+        course_id = self.source_course_id
 
-        content = "<h3>Syllabus and Course Schedule</h3>\n"
+        content = f"<p><strong>Instructor:</strong> {instructor} | <strong>Course ID:</strong> {course_id}</p>\n"
+        content += "<h3>Syllabus and Course Schedule</h3>\n"
         if syllabus_link != "Invalid":
             content += f"""
-<ul>
-  <li><a href="{syllabus_link}">Syllabus.pdf</a></li>
-</ul>
-"""
+        <ul>
+         <li><a href="{syllabus_link}">Syllabus.pdf</a></li>
+        </ul>
+        """
         else:
             content += "<ul><li>Syllabus is missing.</li></ul>\n"
-        
+
         # ----------------------------
         # 2) Main Section Header
         # ----------------------------
-        content += "<h3>Homework Assignments, Projects, Quizzes, and Exams</h3>\n"
+        has_homework = "Assignments" in file_folders
+        has_projects = "Projects" in file_folders
+        has_quizzes = "Quizzes" in file_folders or "Lecture Quizzes" in file_folders
+        has_exams = "Exams" in file_folders
+        labels = []
+
+        if has_homework:
+            labels.append("Homework Assignments")
+        if has_projects:
+            labels.append("Projects")
+        if has_quizzes:
+            labels.append("Quizzes")
+        if has_exams:
+            labels.append("Exams")
+        if len(labels) > 1:
+            header_text = ", ".join(labels[:-1]) + ", and " + labels[-1]
+        else:
+            header_text = labels[0] if labels else ""
+
+        content += f"<h3>{header_text}</h3>\n"
         self.write_to_page(content)
 
         # ----------------------------
@@ -237,25 +269,77 @@ class WriteAbetHtml:
             # TABLE format
             if has_hml:
                 rows = {}
-
                 for f in group_files:
                     fname = f.get("filename") or ""
                     fl = fname.lower()
-                    folder_id = f.get("folder_id")
 
                     if "description" in fl and fl.endswith(".html"):
                         continue
+
+                    folder_id = f.get("folder_id")
+
+                    if folder_id not in assignment_names:
+                        continue
+
+                    # PASTE METADATA BLOCK HERE
+                    folder_name = assignment_names[folder_id]
+
+                    metadata = {}
+
+                    for meta_file in group_files:
+                        meta_name = (meta_file.get("filename") or "").lower()
+                        meta_folder_id = meta_file.get("folder_id")
+
+                        if meta_folder_id == folder_id and meta_name.endswith(".json"):
+                            link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{meta_file.get('id')}/download"
+
+                            try:
+                                import requests
+                                response = requests.get(link)
+                                response.raise_for_status()
+                                metadata = response.json()
+                                print("Loaded metadata:", metadata)
+                            except Exception as e:
+                                print("Failed to load metadata json:", e)
+                                metadata = {}
+
+                            break
+
+                    abet_value = str(metadata.get("abet", "")).strip()
+                    row_name = abet_value if abet_value else folder_name
+
+                    print("Assignment:", folder_name, "| ABET:", abet_value, "| Row:", row_name)
+
+                    if row_name not in rows:
+                        rows[row_name] = {
+                            "High": "",
+                            "Mid": "",
+                            "Low": "",
+                            "Solution": "",
+                            "Marking Guide": "",
+                            "Quiz Statistics": ""
+                        }
+
+                    link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{f.get('id')}"
+                    file_link = f'<a href="{link}">{unquote(fname)}</a>'
+
+                    if self._is_solution_file(fl):
+                        rows[row_name]["Solution"] = file_link
+                        continue
+
+                    if self._is_marking_guide_file(fl):
+                        rows[row_name]["Marking Guide"] = file_link
+                        continue
+
+                    label = self._hml_label(fl)
+                    if label:
+                        rows[row_name][label] = file_link
 
                     label = self._hml_label(fl)
                     if not label:
                         continue
 
-                    folder_name = assignment_names[folder_id]
-                    if folder_name not in rows:
-                         rows[folder_name] = {"High": "", "Mid": "", "Low": ""}
-
-                    link = f"{self.canvas_base_url}courses/{self.source_course_id}/files/{f.get('id')}"
-                    rows[folder_name][label] = f'<a href="{link}">{unquote(fname)}</a>'
+                    rows[folder_name][label] = file_link
 
                 self.write_to_page(f"<h4>{group}</h4>")
                 self.write_to_page("""
@@ -266,6 +350,9 @@ class WriteAbetHtml:
       <th>High</th>
       <th>Mid</th>
       <th>Low</th>
+      <th>Solution</th>
+      <th>Marking Guide</th>
+      <th>Quiz Statistics</th>
     </tr>
   </thead>
   <tbody>
@@ -276,6 +363,8 @@ class WriteAbetHtml:
                     high = rows[base_key]["High"]
                     mid = rows[base_key]["Mid"]
                     low = rows[base_key]["Low"]
+                    solution = rows[base_key]["Solution"]
+                    marking_guide = rows[base_key]["Marking Guide"]
 
                     self.write_to_page(f"""
 <tr>
@@ -283,7 +372,11 @@ class WriteAbetHtml:
   <td>{high}</td>
   <td>{mid}</td>
   <td>{low}</td>
+  <td>{solution}</td>
+  <td>{marking_guide}</td>
+  <td></td>
 </tr>
+
 """)
 
                 self.write_to_page("</tbody></table>")
