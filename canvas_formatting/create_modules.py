@@ -8,11 +8,12 @@ from urllib.parse import urljoin
 from urllib.parse import unquote
 from collections import defaultdict
 
-# from dotenv import load_dotenv
-# load_dotenv()
+from dotenv import load_dotenv
+load_dotenv()
 
 from create_html import WriteAbetHtml
 
+from class_scrape import scrapeASUClassSearchProfessor
 
 # CONFIGURATION
 CANVAS_DOMAIN = os.getenv("CANVAS_DOMAIN", "canvas.asu.edu")  # host only is OK
@@ -54,7 +55,7 @@ def fetch_all_course_files(canvas_domain, course_id, headers):
 
         for part in link_header.split(","):
             if 'rel="next"' in part:
-                next_url = part[part.find("<") + 1 : part.find(">")]
+                next_url = part[part.find("<") + 1: part.find(">")]
                 break
 
         url = next_url
@@ -148,12 +149,14 @@ def get_paginated_list(endpoint, params=None):
 
     return all_items
 
+
 def publish_module(course_id, module_id):
     module_data = {"module": {"published": "true"}}
     response = requests.put(f"{API_BASE_URL}courses/{course_id}/modules/{module_id}", headers=HEADERS, json=module_data)
     response.raise_for_status()
     print(f"Module Published Status: {response.status_code}")
     return response.json()
+
 
 def upload_module_to_canvas(course_id, module_name):
     # Check if the module already exists
@@ -169,7 +172,7 @@ def upload_module_to_canvas(course_id, module_name):
         if module.get("name") == module_name:
             print(f"Module {module_name} already exists with id {module.get("id")}")
             return module
-    
+
     # If the module does not exist, add it to the canvas page:
     print(f"Uploading '{module_name}' module to Canvas...")
     module_data = {"module": {"name": module_name, "position": 1}}
@@ -177,6 +180,7 @@ def upload_module_to_canvas(course_id, module_name):
     response.raise_for_status()
     print(f"Status: {response.status_code}")
     return response.json()
+
 
 def add_single_module_item(course_id, module_id, page):
     # Check if the module item already exists
@@ -211,7 +215,8 @@ def find_file_folder(course_id, semester, year, course_code, instructor_name):
     file_folders = get_paginated_list(endpoint, params={"include[]": "folders"})
 
     # sort by semester, year, course_code, (add instructor_name functionality when folder name is changed from extraction_api)
-    return [f for f in file_folders if f"({year} {semester.capitalize()})" in f.get("full_name", "") and course_code in f.get("full_name", "")]
+    return [f for f in file_folders if
+            f"({year} {semester.capitalize()})" in f.get("full_name", "") and course_code in f.get("full_name", "")]
 
 
 def get_files(course_id: str, semester: str, year: str, file_folders: list[dict]) -> tuple[dict, str]:
@@ -286,7 +291,12 @@ def main():
     module = upload_module_to_canvas(DESTINATION_COURSE_ID, module_name)
 
     # 6) Build HTML + upload page + add to module
-    html_writer.set_up_course_page(file_folders, files, semester, year)
+    from class_scrape import scrapeASUClassSearchProfessor
+
+    prof_data = scrapeASUClassSearchProfessor("2257", "YOUR_CLASS_NUMBER")
+    print(prof_data)  # debug
+    instructor_name = "Steven Osburn"
+    html_writer.set_up_course_page(file_folders, files, semester, year, instructor_name=instructor_name)
     page = add_to_canvas(course_name, semester, year)
     add_single_module_item(DESTINATION_COURSE_ID, module.get("id"), page)
 
@@ -295,6 +305,7 @@ def main():
 
     shutil.rmtree(TEMP_DIR)
     print("\nProcess finished.")
+
 
 if __name__ == "__main__":
     main()
