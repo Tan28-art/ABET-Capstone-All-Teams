@@ -8,8 +8,8 @@ from urllib.parse import urljoin
 from urllib.parse import unquote
 from collections import defaultdict
 
-from dotenv import load_dotenv
-load_dotenv()
+# from dotenv import load_dotenv
+# load_dotenv()
 
 from create_html import WriteAbetHtml
 
@@ -249,59 +249,161 @@ def get_files(course_id: str, semester: str, year: str, file_folders: list[dict]
     print(f"Collected: Syllabus files={len(files['Syllabus'])}, Assignments files={len(files['Assignments'])}")
     return files, course_name
 
+def find_abet_file_folder(course_id):
+    print(f"Finding all ABET folders in course {course_id}...")
+    endpoint = f"courses/{course_id}/folders"
+    file_folders = get_paginated_list(endpoint, params={"include[]": "folders"})
+
+    # sort by semester, year, course_code, (add instructor_name functionality when folder name is changed from extraction_api)
+    return [f for f in file_folders if
+            f"Project Evaluations" in f.get("full_name", "")]
+
+def get_abet_files(course_id: str, folder_id) -> dict:
+  #  course_name = file_folders[0].get("full_name", "").split('/')[1] or "COURSE"
+
+    print("Fetching file list once (paginated)...")
+    endpoint = f"folders/{folder_id}/files"
+    all_files = get_paginated_list(endpoint)
+    
+    #print(all_files)
+    return all_files
 
 def main():
     if os.path.exists(TEMP_DIR):
         shutil.rmtree(TEMP_DIR)
     os.makedirs(TEMP_DIR)
 
-    semester = "fall"
-    year = "2023"
-
-    #### ADD to api
-    # (needs to be connected + course_code designated from running the extraction script)
-    # (needs to be labeled + connected from extraction scripts)
-    # For now, add as fields in UI like the year + semester
-    course_code = "CSE 423"
-    instructor_name = "instructor_placeholder"
-
     html_writer = WriteAbetHtml()
+    file_folders = find_abet_file_folder(SOURCE_COURSE_ID)
+     
+    # files_abet: dict[int, dict] = defaultdict(list)
+    # fids = []
+    # # Sort by only Abet folders:
+    # for f in file_folders:
+    #     name = f.get("full_name")
+    #     fid = f.get("id")
+    #     fids.append(fid)
+    #     if "Abet" in name:
+    #         print(f.get("full_name"))
+    #         files = get_abet_files(SOURCE_COURSE_ID, f.get("id"))
+    #         files_abet[int(fid)].append(files)
+    #         for fil in files:
+    #             if "ABET" in fil.get("display_name"):
+    #                 print(fil.get("display_name"))
 
-    # 1) Find folder structure for the term (Also sort by course_code + add instructor_name functionality)
-    file_folders = find_file_folder(SOURCE_COURSE_ID, semester, year, course_code, instructor_name)
 
-    # 2) Get your grouped files (syllabus/assignments) from your faster method
-    files_by_group, course_name = get_files(SOURCE_COURSE_ID, semester, year, file_folders)
 
-    # 3) ALSO fetch all files (paginated) for your writer’s matching by folder_id
-    all_files = fetch_all_course_files(CANVAS_DOMAIN, SOURCE_COURSE_ID, HEADERS)
+    file_folders = find_abet_file_folder(SOURCE_COURSE_ID) # all ABET_X folders in project evals 
+    files_abet: dict[int, dict] = defaultdict(list) # all files in an ABET eval
+    course_names = []
+    ABET_Data = defaultdict(lambda: defaultdict(list))
+    # = {1: {"CSE423": [file, file, ...], "CSE101": []}, 2: {}, 3: .... }
 
-    # 4) Build the final "files" dict the writer expects
-    syllabus_list = [
-        f for f in all_files
-        if (f.get("display_name") or f.get("filename") or "").lower() in ["syllabus_body.pdf", "syllabus.pdf"]
-    ]
+    # =... "CSEXXX" ["report": ___ ,"instr": __, "high": ___, "avg":___ , ...], ...
 
-    files = dict(files_by_group)  # keep "Syllabus"/"Assignments"
-    files["ALL_FILES"] = all_files
-    files["Syllabus"] = syllabus_list or files.get("Syllabus", [])
+    # Sort by only Abet folders:
+    for folder in file_folders:
+        name = folder.get("full_name")
+        #print(name)
+        if("Abet" in name):
+            abet_num = name[-1:]
+            course_name_abbrev = name.partition("course files/")[2]
+            course_name_split = course_name_abbrev.split()[:2]
+            course_name = " ".join(course_name_split)
+            course_names.append(course_name)
+            #print(abet_num)
 
-    # 5) Create module
-    module_name = f"Courses - Course Folders and Student Work Samples ({semester.capitalize()} {year})"
+            files = get_abet_files(SOURCE_COURSE_ID, folder.get("id"))
+            for file in files:
+                file_name = file.get("display_name")
+              #  print(file_name)
+                # if "_high" in file_name:
+                #     high = file
+                # if "_avg" in file_name:
+                #     avg = file
+                # if "_low" in file_name:
+                #     low = file
+                # if "ABET" in file_name:
+                #     file
+                ABET_Data[abet_num][course_name].append(file)
+        
+        # fid = folder.get("id")
+        # fids.append(fid)
+      #  if "Abet" in name:
+     #       print(f.get("full_name"))
+        # files = get_abet_files(SOURCE_COURSE_ID, folder.get("id"))
+        # files_abet[int(fid)].append(files)
+        # for fil in files:
+        #     if "ABET" in fil.get("display_name"):
+        #         print(fil.get("display_name"))
+
+    course_names = list(set(course_names))
+    # print("DATASTRUCT", ABET_Data)
+    # print("COURSE_NAMES", course_names)
+
+    # semester = "fall"
+    # year = "2023"
+
+    # #### ADD to api
+    # # (needs to be connected + course_code designated from running the extraction script)
+    # # (needs to be labeled + connected from extraction scripts)
+    # # For now, add as fields in UI like the year + semester
+    # course_code = "CSE 423"
+    # instructor_name = "instructor_placeholder"
+
+    # html_writer = WriteAbetHtml()
+
+    # # 1) Find folder structure for the term (Also sort by course_code + add instructor_name functionality)
+    # file_folders = find_file_folder(SOURCE_COURSE_ID, semester, year, course_code, instructor_name)
+
+    # # 2) Get your grouped files (syllabus/assignments) from your faster method
+    # files_by_group, course_name = get_files(SOURCE_COURSE_ID, semester, year, file_folders)
+
+    # # 3) ALSO fetch all files (paginated) for your writer’s matching by folder_id
+    # all_files = fetch_all_course_files(CANVAS_DOMAIN, SOURCE_COURSE_ID, HEADERS)
+
+    # # 4) Build the final "files" dict the writer expects
+    # syllabus_list = [
+    #     f for f in all_files
+    #     if (f.get("display_name") or f.get("filename") or "").lower() in ["syllabus_body.pdf", "syllabus.pdf"]
+    # ]
+
+    # files = dict(files_by_group)  # keep "Syllabus"/"Assignments"
+    # files["ALL_FILES"] = all_files
+    # files["Syllabus"] = syllabus_list or files.get("Syllabus", [])
+
+    # # # 5) Create module
+    # # module_name = f"Courses - Course Folders and Student Work Samples ({semester.capitalize()} {year})"
+    # # module = upload_module_to_canvas(DESTINATION_COURSE_ID, module_name)
+
+    # # # 6) Build HTML + upload page + add to module
+    # # from class_scrape import scrapeASUClassSearchProfessor
+
+    # # prof_data = scrapeASUClassSearchProfessor("2257", "YOUR_CLASS_NUMBER")
+    # # print(prof_data)  # debug
+    # # instructor_name = "Steven Osburn"
+    # # html_writer.set_up_course_page(file_folders, files, semester, year, instructor_name=instructor_name)
+    # # page = add_to_canvas(course_name, semester, year)
+    # # add_single_module_item(DESTINATION_COURSE_ID, module.get("id"), page)
+
+    # # # 7) Publish the module and its contents
+    # # publish_module(DESTINATION_COURSE_ID, module.get("id"))
+   # module_name = f"Assessment Instruments and Student Work Samples"
+   # module = upload_module_to_canvas(DESTINATION_COURSE_ID, module_name)
+   # html_writer.set_up_abet_page(file_folders, files, files_abet, fids)
+  #  page = add_abet_to_canvas()
+   # add_single_module_item(DESTINATION_COURSE_ID, module.get("id"), page)
+    
+    # # module_name = f"Courses - Course Folders and Student Work Samples ({semester.capitalize()} {year})"
+    # # module = upload_module_to_canvas(DESTINATION_COURSE_ID, module_name)
+
+
+    module_name = f"Assessment Instruments and Student Work Samples"
     module = upload_module_to_canvas(DESTINATION_COURSE_ID, module_name)
-
-    # 6) Build HTML + upload page + add to module
-    from class_scrape import scrapeASUClassSearchProfessor
-
-    prof_data = scrapeASUClassSearchProfessor("2257", "YOUR_CLASS_NUMBER")
-    print(prof_data)  # debug
-    instructor_name = "Steven Osburn"
-    html_writer.set_up_course_page(file_folders, files, semester, year, instructor_name=instructor_name)
-    page = add_to_canvas(course_name, semester, year)
+    html_writer.set_up_abet(file_folders, files, ABET_Data, course_names)
+    page = add_abet_to_canvas()
     add_single_module_item(DESTINATION_COURSE_ID, module.get("id"), page)
-
-    # 7) Publish the module and its contents
-    publish_module(DESTINATION_COURSE_ID, module.get("id"))
+    # publish module afterwards
 
     shutil.rmtree(TEMP_DIR)
     print("\nProcess finished.")
